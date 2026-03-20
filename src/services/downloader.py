@@ -6,6 +6,7 @@ from loguru import logger
 
 from src.config import settings
 from src.exceptions import DownloadError
+from src.utils.audio import AudioFormatHandler
 
 
 class BilibiliDownloader:
@@ -84,18 +85,22 @@ class BilibiliDownloader:
                 if "Destination:" in line:
                     filepath = line.split("Destination:")[1].strip()
                     if Path(filepath).exists():
+                        filepath = AudioFormatHandler.ensure_wav(filepath)
                         logger.info(f"下载完成: {filepath}")
                         return filepath
 
-            # Fallback: find wav files
-            wav_files = sorted(
-                self.output_dir.glob("*.wav"),
+            # Fallback: find audio files
+            audio_files = sorted(
+                list(self.output_dir.glob("*.wav"))
+                + list(self.output_dir.glob("*.mp3"))
+                + list(self.output_dir.glob("*.m4a")),
                 key=lambda f: f.stat().st_mtime,
                 reverse=True,
             )
-            if wav_files:
-                logger.info(f"下载完成: {wav_files[0]}")
-                return str(wav_files[0])
+            if audio_files:
+                filepath = AudioFormatHandler.ensure_wav(str(audio_files[0]))
+                logger.info(f"下载完成: {filepath}")
+                return filepath
 
             raise DownloadError("DOWNLOAD_FAILED", "下载完成但找不到输出文件")
 

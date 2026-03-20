@@ -5,6 +5,7 @@ from loguru import logger
 
 from src.config import settings
 from src.exceptions import STTError
+from src.utils.audio import AudioFormatHandler
 
 
 class SpeechToText:
@@ -56,6 +57,12 @@ class SpeechToText:
 
     def transcribe(self, audio_path: str) -> dict:
         self._load_model()
+
+        # Ensure correct format (fallback conversion)
+        try:
+            audio_path = AudioFormatHandler.ensure_wav(audio_path)
+        except Exception:
+            logger.warning("音频格式转换失败，尝试直接读取")
 
         audio_file = Path(audio_path)
         if not audio_file.exists():
