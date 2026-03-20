@@ -11,4 +11,9 @@ dependencies = [
     "pydantic-settings>=2.2.0",
     "loguru>=0.7.0",
     "httpx>=0.27.0",
+    "soundfile>=0.12.0",
+    "torch>=2.2.0",
+    "qwen_asr>=1.0.0",
+    "transformers>=4.38.0",
+    "accelerate>=0.27.0",
 ]
