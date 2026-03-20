@@ -3,15 +3,19 @@ from pathlib import Path
 
 from loguru import logger
 
-from src.exceptions import DownloadError, STTError, ProcessError
+from src.exceptions import DownloadError, STTError, TranslationError, SummarizationError, ProcessError
 from src.services.downloader import BilibiliDownloader
 from src.services.stt import SpeechToText
+from src.services.translator import Translator
+from src.services.summarizer import Summarizer
 
 
 class ProcessingPipeline:
     def __init__(self):
         self.downloader = BilibiliDownloader()
         self.stt = SpeechToText()
+        self.translator = Translator()
+        self.summarizer = Summarizer()
 
     def process(
         self, url: str, translate: bool = False, summarize: bool = False
@@ -29,15 +33,31 @@ class ProcessingPipeline:
             stt_result = self.stt.transcribe(audio_path)
             result.update(stt_result)
 
-            # Step 3: Translation (placeholder)
-            if translate and stt_result.get("language") == "en":
-                logger.info("阶段: 翻译 (占位)")
-                result["translation"] = None
+            # Step 3: Translation
+            if translate:
+                logger.info("阶段: 翻译")
+                try:
+                    translation = self.translator.translate(
+                        stt_result["transcript"], stt_result.get("language", "en")
+                    )
+                    result["translation"] = translation
+                except NotImplementedError:
+                    logger.warning("翻译功能尚未实现")
+                    result["translation"] = None
+                except TranslationError as e:
+                    raise ProcessError("translation", e.code, e.message)
 
-            # Step 4: Summarization (placeholder)
+            # Step 4: Summarization
             if summarize:
-                logger.info("阶段: 摘要 (占位)")
-                result["summary"] = None
+                logger.info("阶段: 摘要")
+                try:
+                    summary = self.summarizer.summarize(stt_result["transcript"])
+                    result["summary"] = summary
+                except NotImplementedError:
+                    logger.warning("摘要功能尚未实现")
+                    result["summary"] = None
+                except SummarizationError as e:
+                    raise ProcessError("summarization", e.code, e.message)
 
             result["url"] = url
             return result
