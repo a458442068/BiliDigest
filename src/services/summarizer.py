@@ -21,6 +21,7 @@ class Summarizer:
         logger.info("调用LLM API生成摘要")
         try:
             summary = self._call_llm(text)
+            summary = self._strip_thinking(summary)
             logger.info("摘要生成完成")
             return summary
         except SummarizationError:
@@ -55,3 +56,9 @@ class Summarizer:
                 )
             data = response.json()
             return data["choices"][0]["message"]["content"]
+
+    @staticmethod
+    def _strip_thinking(text: str) -> str:
+        import re
+
+        return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()

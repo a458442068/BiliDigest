@@ -11,8 +11,6 @@ from src.utils.audio import AudioFormatHandler
 class SpeechToText:
     def __init__(self):
         self._model = None
-        self._processor = None
-        self._device = None
 
     def _load_model(self):
         if self._model is not None:
@@ -34,19 +32,20 @@ class SpeechToText:
                 self._device = "cpu"
                 logger.warning("未检测到GPU，使用CPU推理")
 
-            from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor
+            from qwen_asr import Qwen3ASRModel
 
             model_path = settings.qwen_asr_model_path
             logger.info(f"加载模型: {model_path}")
 
-            self._model = AutoModelForSpeechSeq2Seq.from_pretrained(
+            self._model = Qwen3ASRModel.from_pretrained(
                 model_path,
                 torch_dtype=torch.float16 if self._device == "cuda" else torch.float32,
-                low_cpu_mem_usage=True,
-            ).to(self._device)
-
-            self._processor = AutoProcessor.from_pretrained(model_path)
-            logger.info("模型加载完成")
+                device_map="auto" if self._device == "cuda" else None,
+                max_memory={0: "3GiB", "cpu": "8GiB"}
+                if self._device == "cuda"
+                else None,
+            )
+            logger.info(f"模型加载完成, 设备: {self._device}")
 
         except STTError:
             raise
@@ -58,7 +57,7 @@ class SpeechToText:
     def transcribe(self, audio_path: str) -> dict:
         self._load_model()
 
-        # Ensure correct format (fallback conversion)
+        # Ensure correct format
         try:
             audio_path = AudioFormatHandler.ensure_wav(audio_path)
         except Exception:
@@ -69,55 +68,36 @@ class SpeechToText:
             raise STTError("INFERENCE_ERROR", f"音频文件不存在: {audio_path}")
 
         try:
-            import torch
-
-            # Read audio
+            # Get audio duration
             audio_array, sample_rate = sf.read(str(audio_file))
-            logger.info(f"音频采样率: {sample_rate}Hz")
-
-            # Resample to 16kHz if needed
-            if sample_rate != 16000:
-                import torch.nn.functional as F
-
-                audio_tensor = torch.tensor(audio_array, dtype=torch.float32)
-                if audio_tensor.dim() > 1:
-                    audio_tensor = audio_tensor.mean(dim=1)
-                audio_tensor = audio_tensor.unsqueeze(0).unsqueeze(0)
-                audio_tensor = F.interpolate(
-                    audio_tensor,
-                    size=len(audio_array) * 16000 // sample_rate,
-                    mode="linear",
-                    align_corners=False,
-                )
-                audio_array = audio_tensor.squeeze().numpy()
-                sample_rate = 16000
-                logger.info("已重采样到16kHz")
-
-            # Prepare inputs
-            inputs = self._processor(
-                audio_array,
-                sampling_rate=sample_rate,
-                return_tensors="pt",
-            ).to(self._device)
-
-            # Run inference
-            with torch.no_grad():
-                outputs = self._model.generate(**inputs, max_new_tokens=256)
-
-            transcript = self._processor.batch_decode(
-                outputs, skip_special_tokens=True
-            )[0]
-
-            # Detect language
-            language = self._detect_language(transcript)
-
-            # Calculate duration
             duration_seconds = len(audio_array) / sample_rate
 
-            # Clear GPU cache
-            if self._device == "cuda":
+            logger.info(
+                f"开始语音识别: {audio_path} (采样率: {sample_rate}Hz, 时长: {duration_seconds:.1f}s)"
+            )
+
+            results = self._model.transcribe(audio_path)
+            if not results:
+                raise STTError("INFERENCE_ERROR", "语音识别返回空结果")
+            transcription = results[0]
+            transcript = (
+                transcription.text
+                if hasattr(transcription, "text")
+                else str(transcription)
+            )
+
+            language = (
+                transcription.language
+                if hasattr(transcription, "language") and transcription.language
+                else self._detect_language(transcript)
+            )
+
+            import torch
+
+            if torch.cuda.is_available():
                 torch.cuda.empty_cache()
 
+            logger.info(f"语音识别完成, 语言: {language}")
             return {
                 "transcript": transcript,
                 "language": language,
@@ -128,9 +108,9 @@ class SpeechToText:
             raise
         except Exception as e:
             if "CUDA out of memory" in str(e):
-                if self._device == "cuda":
-                    import torch
+                import torch
 
+                if torch.cuda.is_available():
                     torch.cuda.empty_cache()
                 raise STTError("OUT_OF_MEMORY", f"推理时GPU显存不足: {e}")
             raise STTError("INFERENCE_ERROR", f"推理异常: {e}")
@@ -144,9 +124,7 @@ class SpeechToText:
     def release(self):
         if self._model is not None:
             del self._model
-            del self._processor
             self._model = None
-            self._processor = None
             import torch
 
             if torch.cuda.is_available():

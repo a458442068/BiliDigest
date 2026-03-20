@@ -11,7 +11,8 @@ class Translator:
             logger.warning("OPENAI_API_KEY 未配置，翻译功能将不可用")
 
     def translate(self, text: str, source_lang: str) -> str | None:
-        if source_lang != "en":
+        lang = source_lang.lower().strip()
+        if lang not in ("en", "english"):
             logger.info(f"语言为 {source_lang}，跳过翻译")
             return None
 
@@ -21,6 +22,7 @@ class Translator:
         logger.info("调用LLM API进行翻译")
         try:
             translated = self._call_llm(text)
+            translated = self._strip_thinking(translated)
             logger.info("翻译完成")
             return translated
         except TranslationError:
@@ -55,3 +57,9 @@ class Translator:
                 )
             data = response.json()
             return data["choices"][0]["message"]["content"]
+
+    @staticmethod
+    def _strip_thinking(text: str) -> str:
+        import re
+
+        return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
