@@ -3,7 +3,13 @@ from pathlib import Path
 
 from loguru import logger
 
-from src.exceptions import DownloadError, STTError, TranslationError, SummarizationError, ProcessError
+from src.exceptions import (
+    DownloadError,
+    STTError,
+    TranslationError,
+    SummarizationError,
+    ProcessError,
+)
 from src.services.downloader import BilibiliDownloader
 from src.services.stt import SpeechToText
 from src.services.translator import Translator
@@ -41,9 +47,6 @@ class ProcessingPipeline:
                         stt_result["transcript"], stt_result.get("language", "en")
                     )
                     result["translation"] = translation
-                except NotImplementedError:
-                    logger.warning("翻译功能尚未实现")
-                    result["translation"] = None
                 except TranslationError as e:
                     raise ProcessError("translation", e.code, e.message)
 
@@ -53,9 +56,6 @@ class ProcessingPipeline:
                 try:
                     summary = self.summarizer.summarize(stt_result["transcript"])
                     result["summary"] = summary
-                except NotImplementedError:
-                    logger.warning("摘要功能尚未实现")
-                    result["summary"] = None
                 except SummarizationError as e:
                     raise ProcessError("summarization", e.code, e.message)
 
