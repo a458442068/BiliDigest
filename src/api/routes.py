@@ -18,6 +18,7 @@ async def process_video(request: ProcessRequest):
             url=request.url,
             translate=request.options.translate,
             summarize=request.options.summarize,
+            force=request.options.force,
         )
         return ProcessResult(**result)
     except ProcessError as e:
