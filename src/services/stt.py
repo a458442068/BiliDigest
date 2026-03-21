@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import httpx
 import soundfile as sf
 from loguru import logger
 
@@ -52,9 +53,34 @@ class SpeechToText:
             raise STTError("MODEL_LOAD_ERROR", f"模型加载失败: {e}")
 
     def transcribe(self, audio_path: str) -> dict:
+        backend = settings.stt_backend
+
+        if backend == "remote":
+            logger.info("STT后端: 远程")
+            return self._transcribe_remote(audio_path)
+        elif backend == "local":
+            logger.info("STT后端: 本地")
+            return self._transcribe_local(audio_path)
+        else:  # "default"
+            logger.info("STT后端: 默认 (本地优先)")
+            try:
+                return self._transcribe_local(audio_path)
+            except Exception as local_err:
+                logger.warning(f"本地STT失败: {local_err}")
+                try:
+                    result = self._transcribe_remote(audio_path)
+                    logger.info("远程STT fallback成功")
+                    return result
+                except Exception as remote_err:
+                    logger.error(f"远程STT也失败: {remote_err}")
+                    raise STTError(
+                        "ALL_BACKENDS_FAILED",
+                        f"本地STT失败: {local_err}; 远程STT失败: {remote_err}",
+                    )
+
+    def _transcribe_local(self, audio_path: str) -> dict:
         self._load_model()
 
-        # Ensure correct format
         try:
             audio_path = AudioFormatHandler.ensure_wav(audio_path)
         except Exception:
@@ -65,12 +91,11 @@ class SpeechToText:
             raise STTError("INFERENCE_ERROR", f"音频文件不存在: {audio_path}")
 
         try:
-            # Get audio duration
             audio_array, sample_rate = sf.read(str(audio_file))
             duration_seconds = len(audio_array) / sample_rate
 
             logger.info(
-                f"开始语音识别: {audio_path} (采样率: {sample_rate}Hz, 时长: {duration_seconds:.1f}s)"
+                f"本地STT: {audio_path} (采样率: {sample_rate}Hz, 时长: {duration_seconds:.1f}s)"
             )
 
             results = self._model.transcribe(audio_path)
@@ -94,7 +119,7 @@ class SpeechToText:
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
 
-            logger.info(f"语音识别完成, 语言: {language}")
+            logger.info(f"本地STT完成, 语言: {language}")
             return {
                 "transcript": transcript,
                 "language": language,
@@ -111,6 +136,54 @@ class SpeechToText:
                     torch.cuda.empty_cache()
                 raise STTError("OUT_OF_MEMORY", f"推理时GPU显存不足: {e}")
             raise STTError("INFERENCE_ERROR", f"推理异常: {e}")
+
+    def _transcribe_remote(self, audio_path: str) -> dict:
+        if not settings.stt_api_url:
+            raise STTError("REMOTE_CONFIG_ERROR", "STT_API_URL 未配置")
+
+        audio_file = Path(audio_path)
+        if not audio_file.exists():
+            raise STTError("INFERENCE_ERROR", f"音频文件不存在: {audio_path}")
+
+        url = f"{settings.stt_api_url.rstrip('/')}/v1/audio/transcriptions"
+        headers = {}
+        if settings.stt_api_key:
+            headers["Authorization"] = f"Bearer {settings.stt_api_key}"
+
+        logger.info(f"远程STT: {url}")
+
+        try:
+            with open(audio_path, "rb") as f:
+                files = {"file": (audio_file.name, f, "audio/wav")}
+                data = {"response_format": "verbose_json"}
+                response = httpx.post(
+                    url,
+                    files=files,
+                    data=data,
+                    headers=headers,
+                    timeout=600,
+                )
+
+            if response.status_code != 200:
+                raise STTError(
+                    "REMOTE_API_ERROR",
+                    f"HTTP {response.status_code}: {response.text[:200]}",
+                )
+
+            result = response.json()
+            logger.info("远程STT完成")
+            return {
+                "transcript": result.get("text", ""),
+                "language": result.get("language", "en"),
+                "duration_seconds": result.get("duration"),
+            }
+
+        except STTError:
+            raise
+        except httpx.TimeoutException:
+            raise STTError("REMOTE_TIMEOUT", "远程STT调用超时")
+        except Exception as e:
+            raise STTError("REMOTE_ERROR", f"远程STT调用异常: {e}")
 
     def _detect_language(self, text: str) -> str:
         chinese_chars = sum(1 for c in text if "\u4e00" <= c <= "\u9fff")
