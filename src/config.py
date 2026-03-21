@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     )
     stt_api_url: str = Field(default="", description="远程STT URL")
     stt_api_key: str = Field(default="", description="远程STT API Key")
+    stt_chunk_duration: int = Field(
+        default=0, description="STT分块时长(秒)，0=使用模型默认"
+    )
 
 
 settings = Settings()

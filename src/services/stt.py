@@ -98,6 +98,12 @@ class SpeechToText:
                 f"本地STT: {audio_path} (采样率: {sample_rate}Hz, 时长: {duration_seconds:.1f}s)"
             )
 
+            chunk_duration = settings.stt_chunk_duration
+            if chunk_duration > 0 and duration_seconds > chunk_duration:
+                return self._transcribe_chunked(
+                    audio_array, sample_rate, duration_seconds, chunk_duration
+                )
+
             results = self._model.transcribe(audio_path)
             if not results:
                 raise STTError("INFERENCE_ERROR", "语音识别返回空结果")
@@ -136,6 +142,60 @@ class SpeechToText:
                     torch.cuda.empty_cache()
                 raise STTError("OUT_OF_MEMORY", f"推理时GPU显存不足: {e}")
             raise STTError("INFERENCE_ERROR", f"推理异常: {e}")
+
+    def _transcribe_chunked(
+        self,
+        audio_array,
+        sample_rate: int,
+        duration_seconds: float,
+        chunk_duration: int,
+    ) -> dict:
+        import torch
+        from qwen_asr.inference.utils import split_audio_into_chunks
+
+        chunks = split_audio_into_chunks(
+            audio_array, sample_rate, max_chunk_sec=chunk_duration
+        )
+        logger.info(f"音频分为 {len(chunks)} 块, 每块最大 {chunk_duration}s")
+
+        transcripts = []
+        detected_language = None
+
+        for i, (chunk_wav, offset_sec) in enumerate(chunks):
+            logger.info(
+                f"处理第 {i + 1}/{len(chunks)} 块 (offset: {offset_sec:.1f}s, "
+                f"时长: {len(chunk_wav) / sample_rate:.1f}s)"
+            )
+            results = self._model.transcribe((chunk_wav, sample_rate))
+            if not results:
+                logger.warning(f"第 {i + 1} 块返回空结果，跳过")
+                continue
+
+            transcription = results[0]
+            text = (
+                transcription.text
+                if hasattr(transcription, "text")
+                else str(transcription)
+            )
+            if text.strip():
+                transcripts.append(text)
+
+            if detected_language is None:
+                if hasattr(transcription, "language") and transcription.language:
+                    detected_language = transcription.language
+
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+        if not detected_language:
+            detected_language = self._detect_language("".join(transcripts))
+
+        logger.info(f"分块STT完成, 共 {len(chunks)} 块, 语言: {detected_language}")
+        return {
+            "transcript": " ".join(transcripts),
+            "language": detected_language,
+            "duration_seconds": duration_seconds,
+        }
 
     def _transcribe_remote(self, audio_path: str) -> dict:
         if not settings.stt_api_url:
