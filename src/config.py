@@ -17,6 +17,11 @@ class Settings(BaseSettings):
     port: int = Field(default=8000, description="服务端口")
     log_level: str = Field(default="info", description="日志级别")
     result_dir: str = Field(default="./results", description="结果保存目录")
+    stt_backend: str = Field(
+        default="default", description="STT后端 (default/local/remote)"
+    )
+    stt_api_url: str = Field(default="", description="远程STT URL")
+    stt_api_key: str = Field(default="", description="远程STT API Key")
 
 
 settings = Settings()
