@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field
 class ProcessOptions(BaseModel):
     translate: bool = Field(default=False, description="是否翻译")
     summarize: bool = Field(default=False, description="是否生成摘要")
+    force: bool = Field(default=False, description="是否强制重跑")
 
 
 class ProcessRequest(BaseModel):
@@ -29,3 +30,5 @@ class ProcessResult(BaseModel):
     duration_seconds: float | None = None
     translation: str | None = None
     summary: str | None = None
+    result_dir: str | None = None
+    cached_steps: list[str] = Field(default_factory=list)
