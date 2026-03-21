@@ -7,30 +7,18 @@ from loguru import logger
 from src.config import settings
 from src.exceptions import DownloadError
 from src.utils.audio import AudioFormatHandler
+from src.utils.bv import validate_input, extract_bv_id
 
 
 class BilibiliDownloader:
-    BV_PATTERN = re.compile(r"^BV[1-9A-HJ-NP-Za-km-z]{10}$")
-    URL_PATTERN = re.compile(
-        r"https?://(www\.)?bilibili\.com/video/BV[1-9A-HJ-NP-Za-km-z]{10}"
-    )
-
     def __init__(self, output_dir: str = "/tmp/stt_server"):
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-    def _validate_input(self, url_or_bv: str) -> str:
-        if self.BV_PATTERN.match(url_or_bv):
-            return f"https://www.bilibili.com/video/{url_or_bv}"
-        if self.URL_PATTERN.match(url_or_bv):
-            return url_or_bv
-        if "bilibili.com" in url_or_bv:
-            raise DownloadError("INVALID_URL", f"无效的B站URL: {url_or_bv}")
-        raise DownloadError("INVALID_BV_FORMAT", f"无效的BV号: {url_or_bv}")
-
-    def download(self, url_or_bv: str) -> str:
-        video_url = self._validate_input(url_or_bv)
-        output_template = str(self.output_dir / "%(id)s.%(ext)s")
+    def download(self, url_or_bv: str, part: int = 1) -> str:
+        video_url = validate_input(url_or_bv)
+        bv_id = extract_bv_id(url_or_bv)
+        output_template = str(self.output_dir / f"{bv_id}_P{part}.%(ext)s")
 
         cmd = [
             "yt-dlp",
@@ -41,10 +29,14 @@ class BilibiliDownloader:
             "0",
             "-o",
             output_template,
-            "--no-playlist",
             "--socket-timeout",
             "30",
         ]
+
+        if part > 1:
+            cmd.extend(["--playlist-items", str(part)])
+        else:
+            cmd.append("--no-playlist")
 
         if settings.bilibili_cookie:
             cookie_file = self.output_dir / "cookie.txt"
@@ -53,7 +45,7 @@ class BilibiliDownloader:
 
         cmd.append(video_url)
 
-        logger.info(f"开始下载: {video_url}")
+        logger.info(f"开始下载: {video_url} (分P: {part})")
         try:
             result = subprocess.run(
                 cmd,
@@ -89,11 +81,12 @@ class BilibiliDownloader:
                         logger.info(f"下载完成: {filepath}")
                         return filepath
 
-            # Fallback: find audio files
+            # Fallback: find audio files matching pattern
+            pattern = f"{bv_id}_P{part}*"
             audio_files = sorted(
-                list(self.output_dir.glob("*.wav"))
-                + list(self.output_dir.glob("*.mp3"))
-                + list(self.output_dir.glob("*.m4a")),
+                list(self.output_dir.glob(pattern + ".wav"))
+                + list(self.output_dir.glob(pattern + ".mp3"))
+                + list(self.output_dir.glob(pattern + ".m4a")),
                 key=lambda f: f.stat().st_mtime,
                 reverse=True,
             )

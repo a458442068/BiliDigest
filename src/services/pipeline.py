@@ -1,8 +1,10 @@
-import os
+import shutil
+from datetime import datetime, timezone
 from pathlib import Path
 
 from loguru import logger
 
+from src.config import settings
 from src.exceptions import (
     DownloadError,
     STTError,
@@ -14,6 +16,8 @@ from src.services.downloader import BilibiliDownloader
 from src.services.stt import SpeechToText
 from src.services.translator import Translator
 from src.services.summarizer import Summarizer
+from src.utils.bv import extract_bv_id, get_parts
+from src.utils.storage import ResultStorage
 
 
 class ProcessingPipeline:
@@ -22,59 +26,226 @@ class ProcessingPipeline:
         self.stt = SpeechToText()
         self.translator = Translator()
         self.summarizer = Summarizer()
+        self.storage = ResultStorage()
 
     def process(
-        self, url: str, translate: bool = False, summarize: bool = False
+        self,
+        url: str,
+        translate: bool = False,
+        summarize: bool = False,
+        force: bool = False,
     ) -> dict:
-        result = {}
+        bv_id = extract_bv_id(url)
+        video_url = f"https://www.bilibili.com/video/{bv_id}"
+
+        # Get parts info
+        parts = get_parts(url)
+        total_parts = len(parts)
+
+        # Load existing metadata
+        metadata = self.storage.load_metadata(bv_id)
+        cached_steps = []
+
+        # Check config changes
+        if not force and metadata:
+            self._handle_config_changes(bv_id, metadata, total_parts)
+
+        results = []
+
+        for part_info in parts:
+            part = part_info.part
+            part_result = self._process_part(
+                video_url,
+                bv_id,
+                part,
+                total_parts,
+                translate,
+                summarize,
+                force,
+                cached_steps,
+            )
+            results.append(part_result)
+
+        # Update metadata
+        self._update_metadata(bv_id, video_url, results, parts)
+
+        # Build response (return first part result for API compatibility)
+        main_result = results[0] if results else {}
+        main_result["url"] = video_url
+        main_result["result_dir"] = str(self.storage.get_dir(bv_id))
+        main_result["cached_steps"] = cached_steps
+
+        if total_parts > 1:
+            main_result["parts"] = [
+                {
+                    "part": r.get("part"),
+                    "language": r.get("language"),
+                    "transcript": r.get("transcript")[:100] + "...",
+                }
+                for r in results
+            ]
+
+        return main_result
+
+    def _process_part(
+        self,
+        url: str,
+        bv_id: str,
+        part: int,
+        total_parts: int,
+        translate: bool,
+        summarize: bool,
+        force: bool,
+        cached_steps: list,
+    ) -> dict:
+        result = {"part": part}
+        prefix = f"P{part}_" if total_parts > 1 else ""
         audio_path = None
 
         try:
             # Step 1: Download
-            logger.info(f"阶段: 下载 - {url}")
-            audio_path = self.downloader.download(url)
+            step_name = f"{prefix}download"
+            if not force and self.storage.has_audio(bv_id, part, total_parts):
+                audio_path = self.storage.get_audio_path(bv_id, part, total_parts)
+                cached_steps.append(step_name)
+                logger.info(f"缓存命中: {step_name}")
+            else:
+                logger.info(f"阶段: 下载 - {url} (分P: {part})")
+                audio_path = self.downloader.download(url, part)
+                audio_path = self.storage.save_audio(
+                    bv_id, part, total_parts, audio_path
+                )
 
             # Step 2: STT
-            logger.info("阶段: 语音识别")
-            stt_result = self.stt.transcribe(audio_path)
-            result.update(stt_result)
+            step_name = f"{prefix}stt"
+            if not force and self.storage.has_transcript(bv_id, part, total_parts):
+                transcript = self.storage.load_transcript(bv_id, part, total_parts)
+                cached_steps.append(step_name)
+                logger.info(f"缓存命中: {step_name}")
+            else:
+                logger.info(f"阶段: 语音识别 (分P: {part})")
+                stt_result = self.stt.transcribe(audio_path)
+                transcript = stt_result["transcript"]
+                result["language"] = stt_result.get("language", "en")
+                result["duration_seconds"] = stt_result.get("duration_seconds")
+                self.storage.save_transcript(bv_id, part, total_parts, transcript)
+
+            result["transcript"] = transcript
 
             # Step 3: Translation
             if translate:
-                logger.info("阶段: 翻译")
-                try:
-                    translation = self.translator.translate(
-                        stt_result["transcript"], stt_result.get("language", "en")
+                step_name = f"{prefix}translation"
+                language = result.get("language", "en")
+                if not force and self.storage.has_translation(bv_id, part, total_parts):
+                    translation = self.storage.load_translation(
+                        bv_id, part, total_parts
                     )
-                    result["translation"] = translation
-                except TranslationError as e:
-                    raise ProcessError("translation", e.code, e.message)
+                    cached_steps.append(step_name)
+                    logger.info(f"缓存命中: {step_name}")
+                else:
+                    logger.info(f"阶段: 翻译 (分P: {part})")
+                    try:
+                        translation = self.translator.translate(transcript, language)
+                        if translation:
+                            self.storage.save_translation(
+                                bv_id, part, total_parts, translation
+                            )
+                    except TranslationError as e:
+                        raise ProcessError("translation", e.code, e.message)
+                result["translation"] = translation
 
             # Step 4: Summarization
             if summarize:
-                logger.info("阶段: 摘要")
-                try:
-                    summary = self.summarizer.summarize(stt_result["transcript"])
-                    result["summary"] = summary
-                except SummarizationError as e:
-                    raise ProcessError("summarization", e.code, e.message)
+                step_name = f"{prefix}summary"
+                if not force and self.storage.has_summary(bv_id, part, total_parts):
+                    summary = self.storage.load_summary(bv_id, part, total_parts)
+                    cached_steps.append(step_name)
+                    logger.info(f"缓存命中: {step_name}")
+                else:
+                    logger.info(f"阶段: 摘要 (分P: {part})")
+                    try:
+                        summary = self.summarizer.summarize(transcript)
+                        if summary:
+                            self.storage.save_summary(bv_id, part, total_parts, summary)
+                    except SummarizationError as e:
+                        raise ProcessError("summarization", e.code, e.message)
+                result["summary"] = summary
 
-            result["url"] = url
             return result
 
         except DownloadError as e:
             raise ProcessError("download", e.code, e.message)
         except STTError as e:
             raise ProcessError("stt", e.code, e.message)
-        finally:
-            self._cleanup(audio_path)
 
-    def _cleanup(self, audio_path: str | None):
-        if audio_path:
-            try:
-                p = Path(audio_path)
-                if p.exists():
-                    p.unlink()
-                    logger.info(f"已清理临时文件: {audio_path}")
-            except Exception as e:
-                logger.warning(f"清理临时文件失败: {e}")
+    def _handle_config_changes(self, bv_id: str, metadata: dict, total_parts: int):
+        old_stt = metadata.get("stt_model")
+        old_llm = metadata.get("llm_model")
+
+        stt_changed = old_stt and old_stt != settings.qwen_asr_model_path
+        llm_changed = old_llm and old_llm != self._get_current_llm_model()
+
+        if not stt_changed and not llm_changed:
+            return
+
+        logger.info(f"检测到配置变化: stt={stt_changed}, llm={llm_changed}")
+
+        for part in range(1, total_parts + 1):
+            if stt_changed:
+                self.storage.rename_old_file(
+                    bv_id, part, total_parts, "transcript", old_stt.split("/")[-1]
+                )
+            if llm_changed:
+                self.storage.rename_old_file(
+                    bv_id, part, total_parts, "translation", old_llm
+                )
+                self.storage.rename_old_file(
+                    bv_id, part, total_parts, "summary", old_llm
+                )
+
+    def _get_current_llm_model(self) -> str:
+        return settings.openai_base_url
+
+    def _update_metadata(self, bv_id: str, url: str, results: list, parts: list):
+        metadata = self.storage.load_metadata(bv_id)
+        metadata.update(
+            {
+                "url": url,
+                "bv_id": bv_id,
+                "stt_model": settings.qwen_asr_model_path,
+                "llm_model": self._get_current_llm_model(),
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+        if "created_at" not in metadata:
+            metadata["created_at"] = metadata["updated_at"]
+
+        # Update parts info
+        parts_meta = metadata.get("parts", [])
+        for i, result in enumerate(results):
+            part_num = result.get("part", i + 1)
+            part_entry = next((p for p in parts_meta if p["part"] == part_num), None)
+            if not part_entry:
+                part_entry = {"part": part_num}
+                parts_meta.append(part_entry)
+
+            total_parts = len(parts)
+            part_entry.update(
+                {
+                    "language": result.get("language"),
+                    "duration_seconds": result.get("duration_seconds"),
+                    "has_audio": self.storage.has_audio(bv_id, part_num, total_parts),
+                    "has_transcript": self.storage.has_transcript(
+                        bv_id, part_num, total_parts
+                    ),
+                    "has_translation": self.storage.has_translation(
+                        bv_id, part_num, total_parts
+                    ),
+                    "has_summary": self.storage.has_summary(
+                        bv_id, part_num, total_parts
+                    ),
+                }
+            )
+
+        metadata["parts"] = sorted(parts_meta, key=lambda p: p["part"])
+        self.storage.save_metadata(bv_id, metadata)
