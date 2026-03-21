@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     openai_base_url: str = Field(
         default="https://api.openai.com/v1", description="OpenAI Base URL"
     )
+    llm_model: str = Field(default="gpt-4o-mini", description="LLM模型名称")
     port: int = Field(default=8000, description="服务端口")
     log_level: str = Field(default="info", description="日志级别")
     result_dir: str = Field(default="./results", description="结果保存目录")

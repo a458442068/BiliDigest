@@ -11,18 +11,16 @@ class Translator:
             logger.warning("OPENAI_API_KEY 未配置，翻译功能将不可用")
 
     def translate(self, text: str, source_lang: str) -> str | None:
-        lang = source_lang.lower().strip()
-        if lang in ("zh", "chinese", "中文"):
-            logger.info(f"语言为 {source_lang}，中文内容无需翻译")
-            return None
-
         if not settings.openai_api_key:
             raise TranslationError("LLM_API_ERROR", "OPENAI_API_KEY 未配置")
 
-        logger.info("调用LLM API进行翻译")
+        logger.info(f"调用LLM API进行翻译 (source_lang={source_lang})")
         try:
             translated = self._call_llm(text)
             translated = self._strip_thinking(translated)
+            if translated.strip() == text.strip():
+                logger.info("LLM判断为中文，无需翻译")
+                return None
             logger.info("翻译完成")
             return translated
         except TranslationError:
@@ -37,14 +35,13 @@ class Translator:
             "Content-Type": "application/json",
         }
         payload = {
-            "model": "gpt-4o-mini",
+            "model": settings.llm_model,
             "messages": [
                 {
                     "role": "system",
                     "content": (
-                        "你是一个专业的翻译助手。请将以下内容翻译为中文。"
-                        "核心要求：忠实原文，尽量保持原意和语气，不增删内容，不进行意译或改写。"
-                        "专有名词保留原文或提供通用译名。只返回翻译结果，不要添加任何解释。"
+                        "将以下文本翻译成中文。如果文本已经是中文，直接返回原文。"
+                        "忠实原文，专有名词保留原文。只输出翻译结果。"
                     ),
                 },
                 {"role": "user", "content": text},

@@ -173,7 +173,8 @@ class ProcessingPipeline:
                 else:
                     logger.info(f"阶段: 摘要 (分P: {part})")
                     try:
-                        summary_data = self.summarizer.summarize(transcript)
+                        summary_input = result.get("translation") or transcript
+                        summary_data = self.summarizer.summarize(summary_input)
                         if summary_data:
                             self.storage.save_summary(
                                 bv_id, part, total_parts, summary_data
@@ -219,7 +220,7 @@ class ProcessingPipeline:
                 )
 
     def _get_current_llm_model(self) -> str:
-        return settings.openai_base_url
+        return settings.llm_model
 
     def _update_metadata(
         self,

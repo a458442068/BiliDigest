@@ -39,12 +39,13 @@ class Summarizer:
             "Content-Type": "application/json",
         }
         payload = {
-            "model": "gpt-4o-mini",
+            "model": settings.llm_model,
             "messages": [
                 {
                     "role": "system",
                     "content": (
                         "你是一个专业的文本处理助手。请对以下文字稿生成两份内容，用 `---TRANSCRIPT_CLEAN---` 和 `---SUMMARY---` 分隔。\n\n"
+                        "所有输出内容必须使用中文，专有名词（人名、术语、品牌等）保留原文。\n\n"
                         "1. 【整理版文字稿】在 `---TRANSCRIPT_CLEAN---` 之后：保留原文完整内容和原意，仅去除口语中的语气词、重复、口误等冗余，使语句通顺流畅。不要改变任何观点或信息。\n\n"
                         "2. 【内容摘要】在 `---SUMMARY---` 之后：涵盖原文的主要观点、关键信息和核心结论，语言简洁精炼，适合快速了解全文内容。\n\n"
                         "请严格按照格式输出，不要添加其他说明。"
