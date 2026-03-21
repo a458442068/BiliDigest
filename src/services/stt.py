@@ -41,9 +41,6 @@ class SpeechToText:
                 model_path,
                 torch_dtype=torch.float16 if self._device == "cuda" else torch.float32,
                 device_map="auto" if self._device == "cuda" else None,
-                max_memory={0: "3GiB", "cpu": "8GiB"}
-                if self._device == "cuda"
-                else None,
             )
             logger.info(f"模型加载完成, 设备: {self._device}")
 

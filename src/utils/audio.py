@@ -93,6 +93,14 @@ class AudioFormatHandler:
         if output_path is None:
             output_path = str(input_path.with_suffix(".wav"))
 
+        # If input and output are the same file, use a temp file first
+        if Path(output_path).resolve() == input_path.resolve():
+            tmp_path = str(input_path.with_suffix(".tmp.wav"))
+            final_path = output_path
+        else:
+            tmp_path = output_path
+            final_path = output_path
+
         cmd = [
             "ffmpeg",
             "-y",
@@ -104,10 +112,10 @@ class AudioFormatHandler:
             str(AudioFormatHandler.TARGET_CHANNELS),
             "-acodec",
             "pcm_s16le",
-            output_path,
+            tmp_path,
         ]
 
-        logger.info(f"转换音频: {audio_path} -> {output_path}")
+        logger.info(f"转换音频: {audio_path} -> {final_path}")
         try:
             result = subprocess.run(
                 cmd,
@@ -121,8 +129,14 @@ class AudioFormatHandler:
                     "FORMAT_CONVERSION_ERROR", f"音频转换失败: {result.stderr[:200]}"
                 )
 
-            logger.info(f"音频转换完成: {output_path}")
-            return output_path
+            # Rename temp file to final path if needed
+            if tmp_path != final_path:
+                import os
+
+                os.replace(tmp_path, final_path)
+
+            logger.info(f"音频转换完成: {final_path}")
+            return final_path
         except subprocess.TimeoutExpired:
             raise DownloadError("FORMAT_CONVERSION_ERROR", "音频转换超时")
         except DownloadError:
