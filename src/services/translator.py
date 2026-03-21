@@ -48,7 +48,7 @@ class Translator:
             "temperature": 0.3,
         }
 
-        with httpx.Client(timeout=120) as client:
+        with httpx.Client(timeout=600) as client:
             response = client.post(url, json=payload, headers=headers)
             if response.status_code != 200:
                 raise TranslationError(

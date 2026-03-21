@@ -27,4 +27,10 @@ app.include_router(router)
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=settings.port)
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=settings.port,
+        timeout_keep_alive=600,
+        timeout_graceful_shutdown=600,
+    )
