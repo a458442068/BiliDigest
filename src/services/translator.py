@@ -12,8 +12,11 @@ class Translator:
 
     def translate(self, text: str, source_lang: str) -> str | None:
         lang = source_lang.lower().strip()
+        if lang in ("zh", "chinese", "中文"):
+            logger.info(f"语言为 {source_lang}，中文内容无需翻译")
+            return None
         if lang not in ("en", "english"):
-            logger.info(f"语言为 {source_lang}，跳过翻译")
+            logger.info(f"语言为 {source_lang}，非英文跳过翻译")
             return None
 
         if not settings.openai_api_key:
