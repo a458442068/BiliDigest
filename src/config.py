@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     )
     port: int = Field(default=8000, description="服务端口")
     log_level: str = Field(default="info", description="日志级别")
+    result_dir: str = Field(default="./results", description="结果保存目录")
 
 
 settings = Settings()
