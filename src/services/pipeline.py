@@ -122,6 +122,12 @@ class ProcessingPipeline:
                 transcript = self.storage.load_transcript(bv_id, part, total_parts)
                 cached_steps.append(step_name)
                 logger.info(f"缓存命中: {step_name}")
+                # Load language and duration from metadata
+                metadata = self.storage.load_metadata(bv_id)
+                parts_meta = metadata.get("parts", [])
+                part_meta = next((p for p in parts_meta if p["part"] == part), {})
+                result["language"] = part_meta.get("language", "en")
+                result["duration_seconds"] = part_meta.get("duration_seconds")
             else:
                 logger.info(f"阶段: 语音识别 (分P: {part})")
                 stt_result = self.stt.transcribe(audio_path)
@@ -230,22 +236,22 @@ class ProcessingPipeline:
                 parts_meta.append(part_entry)
 
             total_parts = len(parts)
-            part_entry.update(
-                {
-                    "language": result.get("language"),
-                    "duration_seconds": result.get("duration_seconds"),
-                    "has_audio": self.storage.has_audio(bv_id, part_num, total_parts),
-                    "has_transcript": self.storage.has_transcript(
-                        bv_id, part_num, total_parts
-                    ),
-                    "has_translation": self.storage.has_translation(
-                        bv_id, part_num, total_parts
-                    ),
-                    "has_summary": self.storage.has_summary(
-                        bv_id, part_num, total_parts
-                    ),
-                }
-            )
+            update_dict = {
+                "has_audio": self.storage.has_audio(bv_id, part_num, total_parts),
+                "has_transcript": self.storage.has_transcript(
+                    bv_id, part_num, total_parts
+                ),
+                "has_translation": self.storage.has_translation(
+                    bv_id, part_num, total_parts
+                ),
+                "has_summary": self.storage.has_summary(bv_id, part_num, total_parts),
+            }
+            # Only update language/duration if result has them (not cached)
+            if result.get("language") is not None:
+                update_dict["language"] = result.get("language")
+            if result.get("duration_seconds") is not None:
+                update_dict["duration_seconds"] = result.get("duration_seconds")
+            part_entry.update(update_dict)
 
         metadata["parts"] = sorted(parts_meta, key=lambda p: p["part"])
         self.storage.save_metadata(bv_id, metadata)
