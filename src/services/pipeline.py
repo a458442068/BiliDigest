@@ -38,6 +38,9 @@ class ProcessingPipeline:
         bv_id = extract_bv_id(url)
         video_url = f"https://www.bilibili.com/video/{bv_id}"
 
+        # Get video info
+        video_info = self.downloader.get_video_info(url)
+
         # Get parts info
         parts = get_parts(url)
         total_parts = len(parts)
@@ -67,7 +70,7 @@ class ProcessingPipeline:
             results.append(part_result)
 
         # Update metadata
-        self._update_metadata(bv_id, video_url, results, parts)
+        self._update_metadata(bv_id, video_url, results, parts, video_info)
 
         # Build response (return first part result for API compatibility)
         main_result = results[0] if results else {}
@@ -218,12 +221,20 @@ class ProcessingPipeline:
     def _get_current_llm_model(self) -> str:
         return settings.openai_base_url
 
-    def _update_metadata(self, bv_id: str, url: str, results: list, parts: list):
+    def _update_metadata(
+        self,
+        bv_id: str,
+        url: str,
+        results: list,
+        parts: list,
+        video_info: dict | None = None,
+    ):
         metadata = self.storage.load_metadata(bv_id)
         metadata.update(
             {
                 "url": url,
                 "bv_id": bv_id,
+                "video": video_info or {},
                 "stt_model": settings.qwen_asr_model_path,
                 "llm_model": self._get_current_llm_model(),
                 "updated_at": datetime.now(timezone.utc).isoformat(),

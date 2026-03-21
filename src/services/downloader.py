@@ -1,3 +1,4 @@
+import json
 import re
 import subprocess
 from pathlib import Path
@@ -14,6 +15,33 @@ class BilibiliDownloader:
     def __init__(self, output_dir: str = "/tmp/stt_server"):
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
+
+    def get_video_info(self, url_or_bv: str) -> dict:
+        video_url = validate_input(url_or_bv)
+        cmd = [
+            "yt-dlp",
+            "--dump-json",
+            "--no-download",
+            "--no-warnings",
+            video_url,
+        ]
+        try:
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=30, check=False
+            )
+            if result.returncode != 0:
+                logger.warning(f"获取视频信息失败: {result.stderr[:200]}")
+                return {}
+            info = json.loads(result.stdout)
+            return {
+                "title": info.get("fulltitle") or info.get("title", ""),
+                "description": info.get("description", ""),
+                "uploader": info.get("uploader", ""),
+                "upload_date": info.get("upload_date", ""),
+            }
+        except Exception as e:
+            logger.warning(f"获取视频信息异常: {e}")
+            return {}
 
     def download(self, url_or_bv: str, part: int = 1) -> str:
         video_url = validate_input(url_or_bv)
