@@ -29,6 +29,7 @@ class ProcessResult(BaseModel):
     language: str
     duration_seconds: float | None = None
     translation: str | None = None
+    transcript_clean: str | None = None
     summary: str | None = None
     result_dir: str | None = None
     cached_steps: list[str] = Field(default_factory=list)

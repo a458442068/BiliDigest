@@ -65,11 +65,25 @@ class ResultStorage:
         path.write_text(translation, encoding="utf-8")
         logger.info(f"已保存翻译: {path}")
 
-    def save_summary(self, bv_id: str, part: int, total_parts: int, summary: str):
+    def save_summary(
+        self, bv_id: str, part: int, total_parts: int, summary_data: dict | str
+    ):
         prefix = self._prefix(part, total_parts)
-        path = self.get_dir(bv_id) / f"{prefix}summary.txt"
-        path.write_text(summary, encoding="utf-8")
-        logger.info(f"已保存摘要: {path}")
+        if isinstance(summary_data, dict):
+            # Save transcript_clean
+            if summary_data.get("transcript_clean"):
+                path = self.get_dir(bv_id) / f"{prefix}transcript_clean.txt"
+                path.write_text(summary_data["transcript_clean"], encoding="utf-8")
+                logger.info(f"已保存整理版文字稿: {path}")
+            # Save summary
+            if summary_data.get("summary"):
+                path = self.get_dir(bv_id) / f"{prefix}summary.txt"
+                path.write_text(summary_data["summary"], encoding="utf-8")
+                logger.info(f"已保存摘要: {path}")
+        else:
+            path = self.get_dir(bv_id) / f"{prefix}summary.txt"
+            path.write_text(str(summary_data), encoding="utf-8")
+            logger.info(f"已保存摘要: {path}")
 
     def load_transcript(self, bv_id: str, part: int, total_parts: int) -> str:
         prefix = self._prefix(part, total_parts)
@@ -83,11 +97,16 @@ class ResultStorage:
             encoding="utf-8"
         )
 
-    def load_summary(self, bv_id: str, part: int, total_parts: int) -> str:
+    def load_summary(self, bv_id: str, part: int, total_parts: int) -> dict | str:
         prefix = self._prefix(part, total_parts)
-        return (self.get_dir(bv_id) / f"{prefix}summary.txt").read_text(
-            encoding="utf-8"
-        )
+        summary_path = self.get_dir(bv_id) / f"{prefix}summary.txt"
+        clean_path = self.get_dir(bv_id) / f"{prefix}transcript_clean.txt"
+        result = {}
+        if clean_path.exists():
+            result["transcript_clean"] = clean_path.read_text(encoding="utf-8")
+        if summary_path.exists():
+            result["summary"] = summary_path.read_text(encoding="utf-8")
+        return result if result else ""
 
     def load_metadata(self, bv_id: str) -> dict:
         path = self.get_dir(bv_id) / "metadata.json"

@@ -164,18 +164,24 @@ class ProcessingPipeline:
             if summarize:
                 step_name = f"{prefix}summary"
                 if not force and self.storage.has_summary(bv_id, part, total_parts):
-                    summary = self.storage.load_summary(bv_id, part, total_parts)
+                    summary_data = self.storage.load_summary(bv_id, part, total_parts)
                     cached_steps.append(step_name)
                     logger.info(f"缓存命中: {step_name}")
                 else:
                     logger.info(f"阶段: 摘要 (分P: {part})")
                     try:
-                        summary = self.summarizer.summarize(transcript)
-                        if summary:
-                            self.storage.save_summary(bv_id, part, total_parts, summary)
+                        summary_data = self.summarizer.summarize(transcript)
+                        if summary_data:
+                            self.storage.save_summary(
+                                bv_id, part, total_parts, summary_data
+                            )
                     except SummarizationError as e:
                         raise ProcessError("summarization", e.code, e.message)
-                result["summary"] = summary
+                if summary_data and isinstance(summary_data, dict):
+                    result["transcript_clean"] = summary_data.get("transcript_clean")
+                    result["summary"] = summary_data.get("summary")
+                else:
+                    result["summary"] = summary_data
 
             return result
 
