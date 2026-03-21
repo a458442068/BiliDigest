@@ -117,7 +117,7 @@ class SpeechToText:
             language = (
                 transcription.language
                 if hasattr(transcription, "language") and transcription.language
-                else self._detect_language(transcript)
+                else "unknown"
             )
 
             import torch
@@ -188,7 +188,7 @@ class SpeechToText:
                 torch.cuda.empty_cache()
 
         if not detected_language:
-            detected_language = self._detect_language("".join(transcripts))
+            detected_language = "unknown"
 
         logger.info(f"分块STT完成, 共 {len(chunks)} 块, 语言: {detected_language}")
         return {
@@ -244,12 +244,6 @@ class SpeechToText:
             raise STTError("REMOTE_TIMEOUT", "远程STT调用超时")
         except Exception as e:
             raise STTError("REMOTE_ERROR", f"远程STT调用异常: {e}")
-
-    def _detect_language(self, text: str) -> str:
-        chinese_chars = sum(1 for c in text if "\u4e00" <= c <= "\u9fff")
-        if chinese_chars > len(text) * 0.3:
-            return "zh"
-        return "en"
 
     def release(self):
         if self._model is not None:
