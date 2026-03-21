@@ -8,7 +8,7 @@ from src.utils.logger import setup_logger
 setup_logger(settings.log_level)
 
 app = FastAPI(
-    title="STT Server",
+    title="BiliDigest",
     description="B站视频转文字摘要服务",
     version="0.1.0",
 )

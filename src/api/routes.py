@@ -43,4 +43,4 @@ async def process_video(request: ProcessRequest):
 
 @router.get("/health")
 async def health_check():
-    return {"status": "ok", "service": "stt-server"}
+    return {"status": "ok", "service": "bili-digest"}
