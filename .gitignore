@@ -17,7 +17,7 @@ wheels/
 .idea/
 
 # Models
-models/
+/models/
 
 # Audio files
 *.wav
@@ -28,3 +28,7 @@ models/
 
 # openspec (skill-managed)
 .opencode/
+
+# Results
+/results/
+server.log
