@@ -15,7 +15,9 @@ pipeline = ProcessingPipeline()
 
 
 @router.get("/", response_class=HTMLResponse)
-async def video_list(request: Request, q: str = ""):
+async def video_list(
+    request: Request, q: str = "", sort: str = "updated_at", order: str = "desc"
+):
     videos = storage.list_videos()
     if q:
         q_lower = q.lower()
@@ -24,8 +26,14 @@ async def video_list(request: Request, q: str = ""):
             for v in videos
             if q_lower in v["title"].lower() or q_lower in v["uploader"].lower()
         ]
+    if sort in ("updated_at", "title", "uploader", "duration", "language"):
+        videos.sort(
+            key=lambda v: v.get(sort, ""),
+            reverse=(order == "desc"),
+        )
     return templates.TemplateResponse(
-        "list.html", {"request": request, "videos": videos, "q": q}
+        "list.html",
+        {"request": request, "videos": videos, "q": q, "sort": sort, "order": order},
     )
 
 

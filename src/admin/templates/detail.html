@@ -8,7 +8,7 @@
 <div class="bg-white shadow rounded-lg p-6 mb-6">
     <h1 class="text-2xl font-bold text-gray-900 mb-4">{{ video.title }}</h1>
     <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-        <div><span class="text-gray-500">BV号:</span> {{ bv_id }}</div>
+        <div><span class="text-gray-500">BV号:</span> <a href="https://www.bilibili.com/video/{{ bv_id }}" target="_blank" class="text-indigo-600 hover:underline">{{ bv_id }}</a></div>
         <div><span class="text-gray-500">UP主:</span> {{ video.uploader }}</div>
         <div><span class="text-gray-500">时长:</span> {{ video.duration }}秒</div>
         <div><span class="text-gray-500">分P:</span> {{ total_parts }}</div>
@@ -19,6 +19,15 @@
 {% if total_parts > 1 %}
 <h2 class="text-lg font-semibold text-gray-900 mb-3">分P {{ content.part }}</h2>
 {% endif %}
+
+<div class="mb-6">
+    <div class="relative w-full" style="padding-top: 56.25%;">
+        <iframe class="absolute top-0 left-0 w-full h-full rounded-lg"
+                src="https://player.bilibili.com/player.html?bvid={{ bv_id }}{% if total_parts > 1 %}&p={{ content.part }}{% endif %}"
+                allowfullscreen>
+        </iframe>
+    </div>
+</div>
 
 <div class="mb-6">
     <audio controls class="w-full" preload="none">
