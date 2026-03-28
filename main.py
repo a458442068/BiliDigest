@@ -1,7 +1,9 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from src.api.routes import router
+from src.admin.routes import router as admin_router
 from src.config import settings
 from src.utils.logger import setup_logger
 
@@ -22,6 +24,8 @@ app.add_middleware(
 )
 
 app.include_router(router)
+app.include_router(admin_router)
+app.mount("/results", StaticFiles(directory=settings.result_dir), name="results")
 
 
 if __name__ == "__main__":

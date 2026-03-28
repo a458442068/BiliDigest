@@ -121,6 +121,47 @@ class ResultStorage:
         )
         logger.info(f"已更新metadata: {path}")
 
+    def list_videos(self) -> list[dict]:
+        videos = []
+        if not self.result_dir.exists():
+            return videos
+        for d in sorted(self.result_dir.iterdir()):
+            if not d.is_dir():
+                continue
+            metadata = self.load_metadata(d.name)
+            if not metadata:
+                continue
+            video_info = metadata.get("video", {})
+            parts = metadata.get("parts", [])
+            first_part = parts[0] if parts else {}
+            videos.append(
+                {
+                    "bv_id": metadata.get("bv_id", d.name),
+                    "title": video_info.get("title", d.name),
+                    "uploader": video_info.get("uploader", ""),
+                    "duration": video_info.get("duration", 0),
+                    "language": first_part.get("language", ""),
+                    "updated_at": metadata.get("updated_at", ""),
+                    "has_transcript": any(
+                        p.get("has_transcript") for p in parts
+                    ),
+                    "has_translation": any(
+                        p.get("has_translation") for p in parts
+                    ),
+                    "has_summary": any(p.get("has_summary") for p in parts),
+                }
+            )
+        videos.sort(key=lambda v: v.get("updated_at", ""), reverse=True)
+        return videos
+
+    def delete_video(self, bv_id: str) -> bool:
+        d = self.result_dir / bv_id
+        if d.exists() and d.is_dir():
+            shutil.rmtree(d)
+            logger.info(f"已删除视频目录: {d}")
+            return True
+        return False
+
     def rename_old_file(
         self,
         bv_id: str,

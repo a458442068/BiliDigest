@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}{{ video.title }} - BiliDigest Admin{% endblock %}
+{% block content %}
+<div class="mb-6">
+    <a href="/admin/" class="text-indigo-600 hover:text-indigo-900">&larr; 返回列表</a>
+</div>
+
+<div class="bg-white shadow rounded-lg p-6 mb-6">
+    <h1 class="text-2xl font-bold text-gray-900 mb-4">{{ video.title }}</h1>
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+        <div><span class="text-gray-500">BV号:</span> {{ bv_id }}</div>
+        <div><span class="text-gray-500">UP主:</span> {{ video.uploader }}</div>
+        <div><span class="text-gray-500">时长:</span> {{ video.duration }}秒</div>
+        <div><span class="text-gray-500">分P:</span> {{ total_parts }}</div>
+    </div>
+</div>
+
+{% for content in contents %}
+{% if total_parts > 1 %}
+<h2 class="text-lg font-semibold text-gray-900 mb-3">分P {{ content.part }}</h2>
+{% endif %}
+
+<div class="mb-6">
+    <audio controls class="w-full" preload="none">
+        <source src="/results/{{ bv_id }}/{% if total_parts > 1 %}P{{ content.part }}_{% endif %}audio.wav" type="audio/wav">
+        您的浏览器不支持音频播放
+    </audio>
+</div>
+
+<div class="mb-6" x-data="{ tab: 'transcript' }">
+    <div class="border-b border-gray-200 mb-4">
+        <nav class="flex gap-4">
+            <button @click="tab = 'transcript'" :class="tab === 'transcript' ? 'border-indigo-500 text-indigo-600' : 'border-transparent text-gray-500'" class="py-2 px-1 border-b-2 font-medium text-sm">文字稿</button>
+            {% if content.translation %}
+            <button @click="tab = 'translation'" :class="tab === 'translation' ? 'border-indigo-500 text-indigo-600' : 'border-transparent text-gray-500'" class="py-2 px-1 border-b-2 font-medium text-sm">翻译</button>
+            {% endif %}
+            {% if content.transcript_clean %}
+            <button @click="tab = 'clean'" :class="tab === 'clean' ? 'border-indigo-500 text-indigo-600' : 'border-transparent text-gray-500'" class="py-2 px-1 border-b-2 font-medium text-sm">整理版</button>
+            {% endif %}
+            {% if content.summary %}
+            <button @click="tab = 'summary'" :class="tab === 'summary' ? 'border-indigo-500 text-indigo-600' : 'border-transparent text-gray-500'" class="py-2 px-1 border-b-2 font-medium text-sm">摘要</button>
+            {% endif %}
+        </nav>
+    </div>
+
+    <div x-show="tab === 'transcript'" class="bg-gray-50 rounded-lg p-4 max-h-96 overflow-y-auto">
+        <pre class="whitespace-pre-wrap text-sm text-gray-700">{{ content.transcript or '无文字稿' }}</pre>
+    </div>
+    {% if content.translation %}
+    <div x-show="tab === 'translation'" class="bg-gray-50 rounded-lg p-4 max-h-96 overflow-y-auto" style="display:none">
+        <pre class="whitespace-pre-wrap text-sm text-gray-700">{{ content.translation }}</pre>
+    </div>
+    {% endif %}
+    {% if content.transcript_clean %}
+    <div x-show="tab === 'clean'" class="bg-gray-50 rounded-lg p-4 max-h-96 overflow-y-auto" style="display:none">
+        <pre class="whitespace-pre-wrap text-sm text-gray-700">{{ content.transcript_clean }}</pre>
+    </div>
+    {% endif %}
+    {% if content.summary %}
+    <div x-show="tab === 'summary'" class="bg-gray-50 rounded-lg p-4 max-h-96 overflow-y-auto" style="display:none">
+        <pre class="whitespace-pre-wrap text-sm text-gray-700">{{ content.summary }}</pre>
+    </div>
+    {% endif %}
+</div>
+{% endfor %}
+
+<div class="flex gap-4 mt-8">
+    <form method="post" action="/admin/video/{{ bv_id }}/reprocess" onsubmit="return confirm('确认重新处理该视频？这将覆盖现有结果。')">
+        <button type="submit" class="bg-yellow-500 text-white px-4 py-2 rounded-md hover:bg-yellow-600">重新处理</button>
+    </form>
+    <form method="post" action="/admin/video/{{ bv_id }}/delete" onsubmit="return confirm('确认删除该视频的所有处理结果？此操作不可撤销。')">
+        <button type="submit" class="bg-red-600 text-white px-4 py-2 rounded-md hover:bg-red-700">删除</button>
+    </form>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+{% endblock %}
