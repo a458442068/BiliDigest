@@ -10,7 +10,7 @@ class Summarizer:
         if not settings.openai_api_key:
             logger.warning("OPENAI_API_KEY 未配置，摘要功能将不可用")
 
-    def summarize(self, text: str) -> dict | None:
+    async def summarize(self, text: str) -> dict | None:
         if not text or len(text.strip()) < 10:
             logger.warning("文本内容过短，跳过摘要")
             return None
@@ -20,7 +20,7 @@ class Summarizer:
 
         logger.info("调用LLM API生成摘要")
         try:
-            result = self._call_llm(text)
+            result = await self._call_llm(text)
             result["transcript_clean"] = self._strip_thinking(
                 result["transcript_clean"]
             )
@@ -32,7 +32,7 @@ class Summarizer:
         except Exception as e:
             raise SummarizationError("LLM_API_ERROR", f"摘要API调用失败: {e}")
 
-    def _call_llm(self, text: str) -> dict:
+    async def _call_llm(self, text: str) -> dict:
         url = f"{settings.openai_base_url}/chat/completions"
         headers = {
             "Authorization": f"Bearer {settings.openai_api_key}",
@@ -56,8 +56,8 @@ class Summarizer:
             "temperature": 0.3,
         }
 
-        with httpx.Client(timeout=600) as client:
-            response = client.post(url, json=payload, headers=headers)
+        async with httpx.AsyncClient(timeout=600) as client:
+            response = await client.post(url, json=payload, headers=headers)
             if response.status_code != 200:
                 raise SummarizationError(
                     "LLM_API_ERROR",

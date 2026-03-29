@@ -1,4 +1,5 @@
-import shutil
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -19,6 +20,19 @@ from src.services.summarizer import Summarizer
 from src.utils.bv import extract_bv_id, get_parts
 from src.utils.storage import ResultStorage
 
+# STT 专用线程池：max_workers=1 保证 GPU 串行，避免显存争抢
+_stt_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="stt")
+
+
+def _to_thread(func, *args):
+    """将同步函数放到默认线程池执行，不阻塞事件循环。"""
+    return asyncio.get_event_loop().run_in_executor(None, func, *args)
+
+
+def _to_stt(func, *args):
+    """将 STT 函数放到专用线程池执行，GPU 串行。"""
+    return asyncio.get_event_loop().run_in_executor(_stt_executor, func, *args)
+
 
 class ProcessingPipeline:
     def __init__(self):
@@ -28,7 +42,7 @@ class ProcessingPipeline:
         self.summarizer = Summarizer()
         self.storage = ResultStorage()
 
-    def process(
+    async def process(
         self,
         url: str,
         translate: bool = False,
@@ -39,14 +53,14 @@ class ProcessingPipeline:
         video_url = f"https://www.bilibili.com/video/{bv_id}"
 
         # Get video info
-        video_info = self.downloader.get_video_info(url)
+        video_info = await _to_thread(self.downloader.get_video_info, url)
 
         # Get parts info
-        parts = get_parts(url)
+        parts = await _to_thread(get_parts, url)
         total_parts = len(parts)
 
         # Load existing metadata
-        metadata = self.storage.load_metadata(bv_id)
+        metadata = await _to_thread(self.storage.load_metadata, bv_id)
         cached_steps = []
 
         # Check config changes
@@ -57,7 +71,7 @@ class ProcessingPipeline:
 
         for part_info in parts:
             part = part_info.part
-            part_result = self._process_part(
+            part_result = await self._process_part(
                 video_url,
                 bv_id,
                 part,
@@ -70,7 +84,14 @@ class ProcessingPipeline:
             results.append(part_result)
 
         # Update metadata
-        self._update_metadata(bv_id, video_url, results, parts, video_info)
+        await _to_thread(
+            self._update_metadata,
+            bv_id,
+            video_url,
+            results,
+            parts,
+            video_info,
+        )
 
         # Build response (return first part result for API compatibility)
         main_result = results[0] if results else {}
@@ -90,7 +111,7 @@ class ProcessingPipeline:
 
         return main_result
 
-    def _process_part(
+    async def _process_part(
         self,
         url: str,
         bv_id: str,
@@ -106,7 +127,7 @@ class ProcessingPipeline:
         audio_path = None
 
         try:
-            # Step 1: Download
+            # Step 1: Download (I/O, 不阻塞事件循环)
             step_name = f"{prefix}download"
             if not force and self.storage.has_audio(bv_id, part, total_parts):
                 audio_path = self.storage.get_audio_path(bv_id, part, total_parts)
@@ -114,70 +135,90 @@ class ProcessingPipeline:
                 logger.info(f"缓存命中: {step_name}")
             else:
                 logger.info(f"阶段: 下载 - {url} (分P: {part})")
-                audio_path = self.downloader.download(url, part)
-                audio_path = self.storage.save_audio(
-                    bv_id, part, total_parts, audio_path
+                audio_path = await _to_thread(self.downloader.download, url, part)
+                audio_path = await _to_thread(
+                    self.storage.save_audio, bv_id, part, total_parts, audio_path
                 )
 
-            # Step 2: STT
+            # Step 2: STT (GPU, 专用线程池串行)
             step_name = f"{prefix}stt"
             if not force and self.storage.has_transcript(bv_id, part, total_parts):
-                transcript = self.storage.load_transcript(bv_id, part, total_parts)
+                transcript = await _to_thread(
+                    self.storage.load_transcript, bv_id, part, total_parts
+                )
                 cached_steps.append(step_name)
                 logger.info(f"缓存命中: {step_name}")
                 # Load language and duration from metadata
-                metadata = self.storage.load_metadata(bv_id)
+                metadata = await _to_thread(self.storage.load_metadata, bv_id)
                 parts_meta = metadata.get("parts", [])
                 part_meta = next((p for p in parts_meta if p["part"] == part), {})
                 result["language"] = part_meta.get("language", "en")
                 result["duration_seconds"] = part_meta.get("duration_seconds")
             else:
                 logger.info(f"阶段: 语音识别 (分P: {part})")
-                stt_result = self.stt.transcribe(audio_path)
+                stt_result = await _to_stt(self.stt.transcribe, audio_path)
                 transcript = stt_result["transcript"]
                 result["language"] = stt_result.get("language", "en")
                 result["duration_seconds"] = stt_result.get("duration_seconds")
-                self.storage.save_transcript(bv_id, part, total_parts, transcript)
+                await _to_thread(
+                    self.storage.save_transcript,
+                    bv_id,
+                    part,
+                    total_parts,
+                    transcript,
+                )
 
             result["transcript"] = transcript
 
-            # Step 3: Translation
+            # Step 3: Translation (网络 I/O, 异步不占线程)
             if translate:
                 step_name = f"{prefix}translation"
                 language = result.get("language", "en")
                 if not force and self.storage.has_translation(bv_id, part, total_parts):
-                    translation = self.storage.load_translation(
-                        bv_id, part, total_parts
+                    translation = await _to_thread(
+                        self.storage.load_translation, bv_id, part, total_parts
                     )
                     cached_steps.append(step_name)
                     logger.info(f"缓存命中: {step_name}")
                 else:
                     logger.info(f"阶段: 翻译 (分P: {part})")
                     try:
-                        translation = self.translator.translate(transcript, language)
+                        translation = await self.translator.translate(
+                            transcript, language
+                        )
                         if translation:
-                            self.storage.save_translation(
-                                bv_id, part, total_parts, translation
+                            await _to_thread(
+                                self.storage.save_translation,
+                                bv_id,
+                                part,
+                                total_parts,
+                                translation,
                             )
                     except TranslationError as e:
                         raise ProcessError("translation", e.code, e.message)
                 result["translation"] = translation
 
-            # Step 4: Summarization
+            # Step 4: Summarization (网络 I/O, 异步不占线程)
             if summarize:
                 step_name = f"{prefix}summary"
                 if not force and self.storage.has_summary(bv_id, part, total_parts):
-                    summary_data = self.storage.load_summary(bv_id, part, total_parts)
+                    summary_data = await _to_thread(
+                        self.storage.load_summary, bv_id, part, total_parts
+                    )
                     cached_steps.append(step_name)
                     logger.info(f"缓存命中: {step_name}")
                 else:
                     logger.info(f"阶段: 摘要 (分P: {part})")
                     try:
                         summary_input = result.get("translation") or transcript
-                        summary_data = self.summarizer.summarize(summary_input)
+                        summary_data = await self.summarizer.summarize(summary_input)
                         if summary_data:
-                            self.storage.save_summary(
-                                bv_id, part, total_parts, summary_data
+                            await _to_thread(
+                                self.storage.save_summary,
+                                bv_id,
+                                part,
+                                total_parts,
+                                summary_data,
                             )
                     except SummarizationError as e:
                         raise ProcessError("summarization", e.code, e.message)

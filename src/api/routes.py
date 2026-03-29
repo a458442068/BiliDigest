@@ -14,7 +14,7 @@ pipeline = ProcessingPipeline()
 )
 async def process_video(request: ProcessRequest):
     try:
-        result = pipeline.process(
+        result = await pipeline.process(
             url=request.url,
             translate=request.options.translate,
             summarize=request.options.summarize,

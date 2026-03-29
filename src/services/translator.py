@@ -10,13 +10,13 @@ class Translator:
         if not settings.openai_api_key:
             logger.warning("OPENAI_API_KEY 未配置，翻译功能将不可用")
 
-    def translate(self, text: str, source_lang: str) -> str | None:
+    async def translate(self, text: str, source_lang: str) -> str | None:
         if not settings.openai_api_key:
             raise TranslationError("LLM_API_ERROR", "OPENAI_API_KEY 未配置")
 
         logger.info(f"调用LLM API进行翻译 (source_lang={source_lang})")
         try:
-            translated = self._call_llm(text)
+            translated = await self._call_llm(text)
             translated = self._strip_thinking(translated)
             if translated.strip() == text.strip():
                 logger.info("LLM判断为中文，无需翻译")
@@ -28,7 +28,7 @@ class Translator:
         except Exception as e:
             raise TranslationError("LLM_API_ERROR", f"翻译API调用失败: {e}")
 
-    def _call_llm(self, text: str) -> str:
+    async def _call_llm(self, text: str) -> str:
         url = f"{settings.openai_base_url}/chat/completions"
         headers = {
             "Authorization": f"Bearer {settings.openai_api_key}",
@@ -49,8 +49,8 @@ class Translator:
             "temperature": 0.3,
         }
 
-        with httpx.Client(timeout=600) as client:
-            response = client.post(url, json=payload, headers=headers)
+        async with httpx.AsyncClient(timeout=600) as client:
+            response = await client.post(url, json=payload, headers=headers)
             if response.status_code != 200:
                 raise TranslationError(
                     "LLM_API_ERROR",
