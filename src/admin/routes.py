@@ -5,13 +5,12 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from src.config import settings
-from src.services.pipeline import ProcessingPipeline
+from src.api.routes import pipeline
 from src.utils.storage import ResultStorage
 
 router = APIRouter(prefix="/admin")
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 storage = ResultStorage()
-pipeline = ProcessingPipeline()
 
 
 @router.get("/", response_class=HTMLResponse)
