@@ -102,3 +102,54 @@ async def video_reprocess(bv_id: str, background_tasks: BackgroundTasks):
         force=True,
     )
     return RedirectResponse(url=f"/admin/video/{bv_id}", status_code=303)
+
+
+# 从指定步骤开始重跑：删除该步骤及下游文件，再 force 重跑
+_STEPS_SEQUENCE = ["download", "stt", "translation", "summary"]
+
+
+def _delete_step_files(bv_id: str, step: str, part: int, total_parts: int):
+    """删除指定步骤的产出文件。"""
+    prefix = storage._prefix(part, total_parts)
+    file_map = {
+        "stt": f"{prefix}transcript.txt",
+        "translation": f"{prefix}translation.txt",
+        "summary": f"{prefix}summary.txt",
+    }
+    filename = file_map.get(step)
+    if filename:
+        path = storage.get_dir(bv_id) / filename
+        if path.exists():
+            path.unlink()
+
+
+@router.post("/video/{bv_id}/reprocess/{from_step}")
+async def video_reprocess_from(
+    bv_id: str, from_step: str, background_tasks: BackgroundTasks
+):
+    if from_step not in _STEPS_SEQUENCE:
+        raise HTTPException(status_code=400, detail=f"无效的步骤: {from_step}")
+
+    metadata = storage.load_metadata(bv_id)
+    if not metadata:
+        raise HTTPException(status_code=404, detail="视频不存在")
+
+    parts = metadata.get("parts", [])
+    total_parts = len(parts) or 1
+
+    # 删除 from_step 及其下游步骤的文件
+    start_idx = _STEPS_SEQUENCE.index(from_step)
+    for step in _STEPS_SEQUENCE[start_idx:]:
+        if step == "download":
+            continue  # 不删除音频，让 pipeline 跳过下载
+        for part in range(1, total_parts + 1):
+            _delete_step_files(bv_id, step, part, total_parts)
+
+    url = metadata.get("url", f"https://www.bilibili.com/video/{bv_id}")
+    background_tasks.add_task(
+        pipeline.process,
+        url=url,
+        translate=True,
+        summarize=True,
+    )
+    return RedirectResponse(url=f"/admin/video/{bv_id}", status_code=303)

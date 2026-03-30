@@ -73,10 +73,27 @@
 </div>
 {% endfor %}
 
-<div class="flex gap-4 mt-8">
-    <form method="post" action="/admin/video/{{ bv_id }}/reprocess" onsubmit="return confirm('确认重新处理该视频？这将覆盖现有结果。')">
-        <button type="submit" class="bg-yellow-500 text-white px-4 py-2 rounded-md hover:bg-yellow-600">重新处理</button>
-    </form>
+<div class="flex gap-4 mt-8" x-data="{ open: false }">
+    <div class="relative">
+        <button @click="open = !open" class="bg-yellow-500 text-white px-4 py-2 rounded-md hover:bg-yellow-600 flex items-center gap-1">
+            重新处理
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+        </button>
+        <div x-show="open" @click.away="open = false" x-transition class="absolute left-0 mt-1 w-40 bg-white rounded-md shadow-lg border z-10">
+            <form method="post" action="/admin/video/{{ bv_id }}/reprocess" onsubmit="return confirm('确认重新处理？将覆盖所有结果。')">
+                <button type="submit" class="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100">全部重跑</button>
+            </form>
+            <form method="post" action="/admin/video/{{ bv_id }}/reprocess/stt" onsubmit="return confirm('从STT开始重跑？将保留音频。')">
+                <button type="submit" class="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100">从STT开始</button>
+            </form>
+            <form method="post" action="/admin/video/{{ bv_id }}/reprocess/translation" onsubmit="return confirm('从翻译开始重跑？将保留音频和文字稿。')">
+                <button type="submit" class="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100">从翻译开始</button>
+            </form>
+            <form method="post" action="/admin/video/{{ bv_id }}/reprocess/summary" onsubmit="return confirm('从摘要开始重跑？将保留音频、文字稿和翻译。')">
+                <button type="submit" class="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100">从摘要开始</button>
+            </form>
+        </div>
+    </div>
     <form method="post" action="/admin/video/{{ bv_id }}/delete" onsubmit="return confirm('确认删除该视频的所有处理结果？此操作不可撤销。')">
         <button type="submit" class="bg-red-600 text-white px-4 py-2 rounded-md hover:bg-red-700">删除</button>
     </form>

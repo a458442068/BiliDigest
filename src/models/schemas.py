@@ -5,6 +5,9 @@ class ProcessOptions(BaseModel):
     translate: bool = Field(default=False, description="是否翻译")
     summarize: bool = Field(default=False, description="是否生成摘要")
     force: bool = Field(default=False, description="是否强制重跑")
+    from_step: str | None = Field(
+        default=None, description="从指定步骤开始重跑 (stt/translation/summary)"
+    )
 
 
 class ProcessRequest(BaseModel):
