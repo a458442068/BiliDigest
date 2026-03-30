@@ -67,6 +67,9 @@ class ProcessingPipeline:
         if not force and metadata:
             self._handle_config_changes(bv_id, metadata, total_parts)
 
+        # 写入初始 metadata（has_* 全为 false，admin 页面可见处理中状态）
+        await _to_thread(self._update_metadata, bv_id, video_url, [], parts, video_info)
+
         results = []
 
         for part_info in parts:
@@ -80,6 +83,8 @@ class ProcessingPipeline:
                 summarize,
                 force,
                 cached_steps,
+                video_info,
+                parts,
             )
             results.append(part_result)
 
@@ -121,6 +126,8 @@ class ProcessingPipeline:
         summarize: bool,
         force: bool,
         cached_steps: list,
+        video_info: dict,
+        parts: list,
     ) -> dict:
         result = {"part": part}
         prefix = f"P{part}_" if total_parts > 1 else ""
@@ -139,6 +146,9 @@ class ProcessingPipeline:
                 audio_path = await _to_thread(
                     self.storage.save_audio, bv_id, part, total_parts, audio_path
                 )
+            await _to_thread(
+                self._update_metadata, bv_id, url, [result], parts, video_info
+            )
 
             # Step 2: STT (GPU, 专用线程池串行)
             step_name = f"{prefix}stt"
@@ -167,6 +177,9 @@ class ProcessingPipeline:
                     total_parts,
                     transcript,
                 )
+            await _to_thread(
+                self._update_metadata, bv_id, url, [result], parts, video_info
+            )
 
             result["transcript"] = transcript
 
@@ -197,6 +210,9 @@ class ProcessingPipeline:
                     except TranslationError as e:
                         raise ProcessError("translation", e.code, e.message)
                 result["translation"] = translation
+                await _to_thread(
+                    self._update_metadata, bv_id, url, [result], parts, video_info
+                )
 
             # Step 4: Summarization (网络 I/O, 异步不占线程)
             if summarize:
@@ -227,6 +243,9 @@ class ProcessingPipeline:
                     result["summary"] = summary_data.get("summary")
                 else:
                     result["summary"] = summary_data
+                await _to_thread(
+                    self._update_metadata, bv_id, url, [result], parts, video_info
+                )
 
             return result
 
