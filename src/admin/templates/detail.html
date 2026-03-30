@@ -86,9 +86,11 @@
             <form method="post" action="/admin/video/{{ bv_id }}/reprocess/stt" onsubmit="return confirm('从STT开始重跑？将保留音频。')">
                 <button type="submit" class="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100">从STT开始</button>
             </form>
+            {% if parts and parts[0].get('has_translation') %}
             <form method="post" action="/admin/video/{{ bv_id }}/reprocess/translation" onsubmit="return confirm('从翻译开始重跑？将保留音频和文字稿。')">
                 <button type="submit" class="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100">从翻译开始</button>
             </form>
+            {% endif %}
             <form method="post" action="/admin/video/{{ bv_id }}/reprocess/summary" onsubmit="return confirm('从摘要开始重跑？将保留音频、文字稿和翻译。')">
                 <button type="submit" class="block w-full text-left px-4 py-2 text-sm hover:bg-gray-100">从摘要开始</button>
             </form>
