@@ -235,6 +235,16 @@ class ProcessingPipeline:
                     total_parts,
                     transcript,
                 )
+                # Save segments if timestamps are available
+                segments = stt_result.get("segments")
+                if segments:
+                    await _to_thread(
+                        self.storage.save_segments,
+                        bv_id,
+                        part,
+                        total_parts,
+                        segments,
+                    )
             self._set_progress(bv_id, current_step="stt", step_progress=1.0)
             await _to_thread(
                 self._update_metadata, bv_id, url, [result], parts, video_info

@@ -12,6 +12,7 @@ from src.utils.audio import AudioFormatHandler
 class SpeechToText:
     def __init__(self):
         self._model = None
+        self._timestamps_enabled = settings.stt_timestamps
 
     def _load_model(self):
         if self._model is not None:
@@ -38,12 +39,24 @@ class SpeechToText:
             model_path = settings.qwen_asr_model_path
             logger.info(f"加载模型: {model_path}")
 
-            self._model = Qwen3ASRModel.from_pretrained(
-                model_path,
+            model_kwargs = dict(
                 torch_dtype=torch.float16 if self._device == "cuda" else torch.float32,
                 device_map="auto" if self._device == "cuda" else None,
             )
-            logger.info(f"模型加载完成, 设备: {self._device}")
+
+            if self._timestamps_enabled:
+                aligner_path = settings.forced_aligner_path
+                logger.info(f"加载对齐模型: {aligner_path}")
+                model_kwargs["forced_aligner"] = aligner_path
+                model_kwargs["forced_aligner_kwargs"] = {
+                    "dtype": torch.float16 if self._device == "cuda" else torch.float32,
+                    "device_map": "auto" if self._device == "cuda" else None,
+                }
+
+            self._model = Qwen3ASRModel.from_pretrained(model_path, **model_kwargs)
+            logger.info(
+                f"模型加载完成, 设备: {self._device}, 时间戳: {self._timestamps_enabled}"
+            )
 
         except STTError:
             raise
@@ -104,7 +117,9 @@ class SpeechToText:
                     audio_array, sample_rate, duration_seconds, chunk_duration
                 )
 
-            results = self._model.transcribe(audio_path)
+            results = self._model.transcribe(
+                audio_path, return_time_stamps=self._timestamps_enabled
+            )
             if not results:
                 raise STTError("INFERENCE_ERROR", "语音识别返回空结果")
             transcription = results[0]
@@ -120,17 +135,42 @@ class SpeechToText:
                 else "unknown"
             )
 
+            # Extract timestamps if available
+            segments = None
+            if (
+                self._timestamps_enabled
+                and hasattr(transcription, "time_stamps")
+                and transcription.time_stamps
+            ):
+                items = (
+                    transcription.time_stamps.items
+                    if hasattr(transcription.time_stamps, "items")
+                    else []
+                )
+                segments = [
+                    {
+                        "text": item.text,
+                        "start": round(item.start_time, 3),
+                        "end": round(item.end_time, 3),
+                    }
+                    for item in items
+                ]
+                logger.info(f"提取时间戳: {len(segments)} 个片段")
+
             import torch
 
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
 
             logger.info(f"本地STT完成, 语言: {language}")
-            return {
+            result = {
                 "transcript": transcript,
                 "language": language,
                 "duration_seconds": duration_seconds,
             }
+            if segments:
+                result["segments"] = segments
+            return result
 
         except STTError:
             raise

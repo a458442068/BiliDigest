@@ -57,6 +57,23 @@ class ResultStorage:
         path.write_text(transcript, encoding="utf-8")
         logger.info(f"已保存文字稿: {path}")
 
+    def has_segments(self, bv_id: str, part: int, total_parts: int) -> bool:
+        prefix = self._prefix(part, total_parts)
+        return (self.get_dir(bv_id) / f"{prefix}segments.json").exists()
+
+    def save_segments(self, bv_id: str, part: int, total_parts: int, segments: list):
+        prefix = self._prefix(part, total_parts)
+        path = self.get_dir(bv_id) / f"{prefix}segments.json"
+        path.write_text(json.dumps(segments, ensure_ascii=False), encoding="utf-8")
+        logger.info(f"已保存时间戳: {path}")
+
+    def load_segments(self, bv_id: str, part: int, total_parts: int) -> list:
+        prefix = self._prefix(part, total_parts)
+        path = self.get_dir(bv_id) / f"{prefix}segments.json"
+        if path.exists():
+            return json.loads(path.read_text(encoding="utf-8"))
+        return []
+
     def save_translation(
         self, bv_id: str, part: int, total_parts: int, translation: str
     ):

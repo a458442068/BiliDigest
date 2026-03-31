@@ -84,6 +84,10 @@
         <source src="/results/{{ bv_id }}/{% if total_parts > 1 %}P{{ content.part }}_{% endif %}audio.wav" type="audio/wav">
         您的浏览器不支持音频播放
     </audio>
+    <div class="flex gap-3 mt-2 text-sm">
+        <a href="/api/v1/export/{{ bv_id }}/srt?part={{ content.part }}" class="text-indigo-600 dark:text-indigo-400 hover:underline">下载 SRT</a>
+        <a href="/api/v1/export/{{ bv_id }}/vtt?part={{ content.part }}" class="text-indigo-600 dark:text-indigo-400 hover:underline">下载 VTT</a>
+    </div>
 </div>
 
 <div class="mb-6" x-data="{ tab: 'transcript' }">

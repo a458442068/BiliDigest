@@ -26,6 +26,12 @@ class Settings(BaseSettings):
     stt_chunk_duration: int = Field(
         default=0, description="STT分块时长(秒)，0=使用模型默认"
     )
+    stt_timestamps: bool = Field(
+        default=False, description="启用时间戳（需加载对齐模型）"
+    )
+    forced_aligner_path: str = Field(
+        default="Qwen/Qwen3-ForcedAligner-0.6B", description="对齐模型路径"
+    )
 
 
 settings = Settings()

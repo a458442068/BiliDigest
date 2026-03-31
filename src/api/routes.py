@@ -1,4 +1,5 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import PlainTextResponse
 from loguru import logger
 
 from src.models.schemas import (
@@ -80,3 +81,63 @@ async def get_progress(bv_id: str):
             current_part=1,
         )
     raise HTTPException(status_code=404, detail="视频不存在")
+
+
+@router.get("/export/{bv_id}/srt", response_class=PlainTextResponse)
+async def export_srt(bv_id: str, part: int = Query(default=1)):
+    from src.utils.storage import ResultStorage
+    from src.utils.subtitle import segments_to_srt, transcript_to_srt
+
+    storage = ResultStorage()
+    metadata = storage.load_metadata(bv_id)
+    if not metadata:
+        raise HTTPException(status_code=404, detail="视频不存在")
+
+    total_parts = len(metadata.get("parts", [])) or 1
+    if part < 1 or part > total_parts:
+        raise HTTPException(status_code=400, detail=f"分P不存在: {part}")
+
+    segments = storage.load_segments(bv_id, part, total_parts)
+    if segments:
+        content = segments_to_srt(segments)
+    else:
+        transcript = storage.load_transcript(bv_id, part, total_parts)
+        parts_meta = metadata.get("parts", [])
+        part_meta = next((p for p in parts_meta if p["part"] == part), {})
+        duration = part_meta.get("duration_seconds", 0) or 0
+        content = transcript_to_srt(transcript, duration)
+
+    if not content:
+        raise HTTPException(status_code=404, detail="无可用字幕数据")
+
+    return PlainTextResponse(content, media_type="text/plain")
+
+
+@router.get("/export/{bv_id}/vtt", response_class=PlainTextResponse)
+async def export_vtt(bv_id: str, part: int = Query(default=1)):
+    from src.utils.storage import ResultStorage
+    from src.utils.subtitle import segments_to_vtt, transcript_to_vtt
+
+    storage = ResultStorage()
+    metadata = storage.load_metadata(bv_id)
+    if not metadata:
+        raise HTTPException(status_code=404, detail="视频不存在")
+
+    total_parts = len(metadata.get("parts", [])) or 1
+    if part < 1 or part > total_parts:
+        raise HTTPException(status_code=400, detail=f"分P不存在: {part}")
+
+    segments = storage.load_segments(bv_id, part, total_parts)
+    if segments:
+        content = segments_to_vtt(segments)
+    else:
+        transcript = storage.load_transcript(bv_id, part, total_parts)
+        parts_meta = metadata.get("parts", [])
+        part_meta = next((p for p in parts_meta if p["part"] == part), {})
+        duration = part_meta.get("duration_seconds", 0) or 0
+        content = transcript_to_vtt(transcript, duration)
+
+    if not content:
+        raise HTTPException(status_code=404, detail="无可用字幕数据")
+
+    return PlainTextResponse(content, media_type="text/vtt")
