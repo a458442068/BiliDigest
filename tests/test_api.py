@@ -13,7 +13,7 @@ class TestHealthEndpoint:
         assert response.status_code == 200
         data = response.json()
         assert data["status"] == "ok"
-        assert data["service"] == "stt-server"
+        assert data["service"] == "bili-digest"
 
 
 class TestProcessEndpoint:
@@ -21,9 +21,9 @@ class TestProcessEndpoint:
         response = client.post("/api/v1/process", json={})
         assert response.status_code == 422
 
-    def test_process_invalid_url(self):
+    def test_process_unsupported_url(self):
         response = client.post(
-            "/api/v1/process", json={"url": "https://youtube.com/watch?v=123"}
+            "/api/v1/process", json={"url": "https://example.com/video/123"}
         )
         assert response.status_code == 400
         data = response.json()
@@ -33,7 +33,7 @@ class TestProcessEndpoint:
         response = client.post("/api/v1/process", json={"url": "INVALID_BV"})
         assert response.status_code == 400
         data = response.json()
-        assert data["detail"]["error"]["stage"] == "download"
+        assert data["detail"]["error"]["code"] == "INVALID_URL"
 
     def test_process_with_options(self):
         response = client.post(
@@ -44,5 +44,3 @@ class TestProcessEndpoint:
             },
         )
         assert response.status_code == 400
-        data = response.json()
-        assert data["detail"]["error"]["stage"] == "download"

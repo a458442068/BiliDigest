@@ -8,7 +8,7 @@ from loguru import logger
 from src.config import settings
 from src.exceptions import DownloadError
 from src.utils.audio import AudioFormatHandler
-from src.utils.bv import validate_input, extract_bv_id
+from src.utils.bv import validate_input, extract_video_id
 
 
 class BilibiliDownloader:
@@ -45,8 +45,8 @@ class BilibiliDownloader:
 
     def download(self, url_or_bv: str, part: int = 1) -> str:
         video_url = validate_input(url_or_bv)
-        bv_id = extract_bv_id(url_or_bv)
-        output_template = str(self.output_dir / f"{bv_id}_P{part}.%(ext)s")
+        video_id = extract_video_id(url_or_bv)
+        output_template = str(self.output_dir / f"{video_id}_P{part}.%(ext)s")
 
         cmd = [
             "yt-dlp",
@@ -110,7 +110,7 @@ class BilibiliDownloader:
                         return filepath
 
             # Fallback: find audio files matching pattern
-            pattern = f"{bv_id}_P{part}*"
+            pattern = f"{video_id}_P{part}*"
             audio_files = sorted(
                 list(self.output_dir.glob(pattern + ".wav"))
                 + list(self.output_dir.glob(pattern + ".mp3"))

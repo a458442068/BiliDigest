@@ -137,17 +137,15 @@ class ResultStorage:
             videos.append(
                 {
                     "bv_id": metadata.get("bv_id", d.name),
+                    "url": metadata.get("url", ""),
+                    "source": metadata.get("source", "bilibili"),
                     "title": video_info.get("title", d.name),
                     "uploader": video_info.get("uploader", ""),
                     "duration": video_info.get("duration", 0),
                     "language": first_part.get("language", ""),
                     "updated_at": metadata.get("updated_at", ""),
-                    "has_transcript": any(
-                        p.get("has_transcript") for p in parts
-                    ),
-                    "has_translation": any(
-                        p.get("has_translation") for p in parts
-                    ),
+                    "has_transcript": any(p.get("has_transcript") for p in parts),
+                    "has_translation": any(p.get("has_translation") for p in parts),
                     "has_summary": any(p.get("has_summary") for p in parts),
                 }
             )

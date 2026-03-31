@@ -17,7 +17,7 @@ from src.services.downloader import BilibiliDownloader
 from src.services.stt import SpeechToText
 from src.services.translator import Translator
 from src.services.summarizer import Summarizer
-from src.utils.bv import extract_bv_id, get_parts
+from src.utils.bv import extract_video_id, get_parts, validate_input, get_source_name
 from src.utils.storage import ResultStorage
 
 # STT 专用线程池：max_workers=1 保证 GPU 串行，避免显存争抢
@@ -49,8 +49,8 @@ class ProcessingPipeline:
         summarize: bool = False,
         force: bool = False,
     ) -> dict:
-        bv_id = extract_bv_id(url)
-        video_url = f"https://www.bilibili.com/video/{bv_id}"
+        bv_id = extract_video_id(url)
+        video_url = validate_input(url)
 
         # Get video info
         video_info = await _to_thread(self.downloader.get_video_info, url)
@@ -295,6 +295,7 @@ class ProcessingPipeline:
             {
                 "url": url,
                 "bv_id": bv_id,
+                "source": get_source_name(url),
                 "video": video_info or {},
                 "stt_model": settings.qwen_asr_model_path,
                 "llm_model": self._get_current_llm_model(),

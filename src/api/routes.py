@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException
 from loguru import logger
 
 from src.models.schemas import ProcessRequest, ProcessResult, ErrorResponse, ErrorDetail
-from src.exceptions import ProcessError
+from src.exceptions import ProcessError, DownloadError
 from src.services.pipeline import ProcessingPipeline
 
 router = APIRouter(prefix="/api/v1")
@@ -21,6 +21,14 @@ async def process_video(request: ProcessRequest):
             force=request.options.force,
         )
         return ProcessResult(**result)
+    except DownloadError as e:
+        logger.error(f"下载校验失败 [{e.code}] {e.message}")
+        raise HTTPException(
+            status_code=400,
+            detail=ErrorResponse(
+                error=ErrorDetail(stage="download", code=e.code, message=e.message)
+            ).model_dump(),
+        )
     except ProcessError as e:
         logger.error(f"处理失败 [{e.stage}:{e.code}] {e.message}")
         raise HTTPException(

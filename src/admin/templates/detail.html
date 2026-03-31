@@ -8,7 +8,7 @@
 <div class="bg-white dark:bg-gray-800 shadow rounded-lg p-6 mb-6">
     <h1 class="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-4">{{ video.title }}</h1>
     <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-        <div><span class="text-gray-500 dark:text-gray-400">BV号:</span> <a href="https://www.bilibili.com/video/{{ bv_id }}" target="_blank" class="text-indigo-600 dark:text-indigo-400 hover:underline">{{ bv_id }}</a></div>
+        <div><span class="text-gray-500 dark:text-gray-400">来源:</span> <a href="{{ metadata.url or ('https://www.bilibili.com/video/' + bv_id) }}" target="_blank" class="text-indigo-600 dark:text-indigo-400 hover:underline">{{ metadata.source or 'bilibili' }}</a></div>
         <div><span class="text-gray-500 dark:text-gray-400">UP主:</span> <span class="text-gray-900 dark:text-gray-100">{{ video.uploader }}</span></div>
         <div><span class="text-gray-500 dark:text-gray-400">时长:</span> <span class="text-gray-900 dark:text-gray-100">{{ video.duration }}秒</span></div>
         <div><span class="text-gray-500 dark:text-gray-400">分P:</span> <span class="text-gray-900 dark:text-gray-100">{{ total_parts }}</span></div>
@@ -20,6 +20,7 @@
 <h2 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-3">分P {{ content.part }}</h2>
 {% endif %}
 
+{% if (metadata.source or 'bilibili') == 'bilibili' %}
 <div class="mb-6">
     <div class="relative w-full" style="padding-top: 56.25%;">
         <iframe class="absolute top-0 left-0 w-full h-full rounded-lg"
@@ -28,6 +29,7 @@
         </iframe>
     </div>
 </div>
+{% endif %}
 
 <div class="mb-6">
     <audio controls class="w-full" preload="none">
