@@ -36,3 +36,15 @@ class ProcessResult(BaseModel):
     summary: str | None = None
     result_dir: str | None = None
     cached_steps: list[str] = Field(default_factory=list)
+
+
+class ProgressInfo(BaseModel):
+    bv_id: str
+    status: str = Field(description="processing | done | error")
+    current_step: str = Field(
+        description="downloading | stt | translating | summarizing | done"
+    )
+    step_progress: float = Field(default=0.0, description="当前步骤进度 0.0~1.0")
+    total_parts: int = 1
+    current_part: int = 1
+    error: str | None = None

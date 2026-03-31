@@ -17,6 +17,7 @@ from src.services.downloader import BilibiliDownloader
 from src.services.stt import SpeechToText
 from src.services.translator import Translator
 from src.services.summarizer import Summarizer
+from src.models.schemas import ProgressInfo
 from src.utils.bv import extract_video_id, get_parts, validate_input, get_source_name
 from src.utils.storage import ResultStorage
 
@@ -41,6 +42,16 @@ class ProcessingPipeline:
         self.translator = Translator()
         self.summarizer = Summarizer()
         self.storage = ResultStorage()
+        self._progress: dict[str, ProgressInfo] = {}
+
+    def get_progress(self, bv_id: str) -> ProgressInfo | None:
+        return self._progress.get(bv_id)
+
+    def _set_progress(self, bv_id: str, **kwargs):
+        if bv_id in self._progress:
+            info = self._progress[bv_id]
+            for k, v in kwargs.items():
+                setattr(info, k, v)
 
     async def process(
         self,
@@ -59,6 +70,49 @@ class ProcessingPipeline:
         parts = await _to_thread(get_parts, url)
         total_parts = len(parts)
 
+        # Initialize progress
+        self._progress[bv_id] = ProgressInfo(
+            bv_id=bv_id,
+            status="processing",
+            current_step="downloading",
+            step_progress=0.0,
+            total_parts=total_parts,
+            current_part=1,
+        )
+
+        try:
+            return await self._process_inner(
+                bv_id,
+                video_url,
+                url,
+                parts,
+                total_parts,
+                translate,
+                summarize,
+                force,
+                video_info,
+            )
+        except Exception:
+            self._set_progress(bv_id, status="error", error="处理失败")
+            raise
+        finally:
+            if bv_id in self._progress and self._progress[bv_id].status == "processing":
+                self._set_progress(
+                    bv_id, status="done", current_step="done", step_progress=1.0
+                )
+
+    async def _process_inner(
+        self,
+        bv_id: str,
+        video_url: str,
+        url: str,
+        parts: list,
+        total_parts: int,
+        translate: bool,
+        summarize: bool,
+        force: bool,
+        video_info: dict,
+    ) -> dict:
         # Load existing metadata
         metadata = await _to_thread(self.storage.load_metadata, bv_id)
         cached_steps = []
@@ -74,6 +128,7 @@ class ProcessingPipeline:
 
         for part_info in parts:
             part = part_info.part
+            self._set_progress(bv_id, current_part=part)
             part_result = await self._process_part(
                 video_url,
                 bv_id,
@@ -136,6 +191,7 @@ class ProcessingPipeline:
         try:
             # Step 1: Download (I/O, 不阻塞事件循环)
             step_name = f"{prefix}download"
+            self._set_progress(bv_id, current_step="downloading", step_progress=0.0)
             if not force and self.storage.has_audio(bv_id, part, total_parts):
                 audio_path = self.storage.get_audio_path(bv_id, part, total_parts)
                 cached_steps.append(step_name)
@@ -146,12 +202,14 @@ class ProcessingPipeline:
                 audio_path = await _to_thread(
                     self.storage.save_audio, bv_id, part, total_parts, audio_path
                 )
+            self._set_progress(bv_id, current_step="downloading", step_progress=1.0)
             await _to_thread(
                 self._update_metadata, bv_id, url, [result], parts, video_info
             )
 
             # Step 2: STT (GPU, 专用线程池串行)
             step_name = f"{prefix}stt"
+            self._set_progress(bv_id, current_step="stt", step_progress=0.0)
             if not force and self.storage.has_transcript(bv_id, part, total_parts):
                 transcript = await _to_thread(
                     self.storage.load_transcript, bv_id, part, total_parts
@@ -177,6 +235,7 @@ class ProcessingPipeline:
                     total_parts,
                     transcript,
                 )
+            self._set_progress(bv_id, current_step="stt", step_progress=1.0)
             await _to_thread(
                 self._update_metadata, bv_id, url, [result], parts, video_info
             )
@@ -186,6 +245,7 @@ class ProcessingPipeline:
             # Step 3: Translation (网络 I/O, 异步不占线程)
             if translate:
                 step_name = f"{prefix}translation"
+                self._set_progress(bv_id, current_step="translating", step_progress=0.0)
                 language = result.get("language", "en")
                 if not force and self.storage.has_translation(bv_id, part, total_parts):
                     translation = await _to_thread(
@@ -210,6 +270,7 @@ class ProcessingPipeline:
                     except TranslationError as e:
                         raise ProcessError("translation", e.code, e.message)
                 result["translation"] = translation
+                self._set_progress(bv_id, current_step="translating", step_progress=1.0)
                 await _to_thread(
                     self._update_metadata, bv_id, url, [result], parts, video_info
                 )
@@ -217,6 +278,7 @@ class ProcessingPipeline:
             # Step 4: Summarization (网络 I/O, 异步不占线程)
             if summarize:
                 step_name = f"{prefix}summary"
+                self._set_progress(bv_id, current_step="summarizing", step_progress=0.0)
                 if not force and self.storage.has_summary(bv_id, part, total_parts):
                     summary_data = await _to_thread(
                         self.storage.load_summary, bv_id, part, total_parts
@@ -243,6 +305,7 @@ class ProcessingPipeline:
                     result["summary"] = summary_data.get("summary")
                 else:
                     result["summary"] = summary_data
+                self._set_progress(bv_id, current_step="summarizing", step_progress=1.0)
                 await _to_thread(
                     self._update_metadata, bv_id, url, [result], parts, video_info
                 )

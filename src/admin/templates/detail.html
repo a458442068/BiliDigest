@@ -15,6 +15,54 @@
     </div>
 </div>
 
+<div x-data="progressPoller('{{ bv_id }}')" x-init="start()" x-show="status === 'processing'"
+     class="bg-white dark:bg-gray-800 shadow rounded-lg p-4 mb-6">
+    <div class="flex items-center justify-between mb-2 text-sm">
+        <span class="text-gray-700 dark:text-gray-300 font-medium">
+            处理中 - <span x-text="stepLabels[current_step] || current_step"></span>
+            <span x-show="total_parts > 1" x-text="'(分P ' + current_part + '/' + total_parts + ')'"></span>
+        </span>
+        <span class="text-gray-500 dark:text-gray-400" x-text="Math.round(step_progress * 100) + '%'"></span>
+    </div>
+    <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+        <div class="bg-indigo-600 h-2 rounded-full transition-all duration-300" :style="'width:' + (step_progress * 100) + '%'"></div>
+    </div>
+    <script>
+    function progressPoller(bvId) {
+        return {
+            status: 'processing',
+            current_step: 'downloading',
+            step_progress: 0,
+            total_parts: 1,
+            current_part: 1,
+            timer: null,
+            stepLabels: { downloading: '下载中', stt: '语音识别', translating: '翻译中', summarizing: '生成摘要', done: '完成' },
+            start() {
+                this.poll();
+                this.timer = setInterval(() => this.poll(), 2000);
+            },
+            async poll() {
+                try {
+                    const res = await fetch('/api/v1/status/' + bvId);
+                    if (res.ok) {
+                        const data = await res.json();
+                        this.status = data.status;
+                        this.current_step = data.current_step;
+                        this.step_progress = data.step_progress;
+                        this.total_parts = data.total_parts;
+                        this.current_part = data.current_part;
+                        if (data.status !== 'processing') {
+                            clearInterval(this.timer);
+                            if (data.status === 'done') location.reload();
+                        }
+                    }
+                } catch(e) {}
+            }
+        }
+    }
+    </script>
+</div>
+
 {% for content in contents %}
 {% if total_parts > 1 %}
 <h2 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-3">分P {{ content.part }}</h2>
