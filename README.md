@@ -1,28 +1,25 @@
-# STT Server - B站视频转文字摘要服务
+# BiliDigest - 视频转文字摘要服务
 
 ## 简介
 
-一个自动化工具，从B站视频链接提取音频，通过Qwen3-ASR模型转换为文字，支持英文翻译和摘要生成。
+自动化工具，从视频链接提取音频，通过 Qwen3-ASR 模型转换为文字，支持翻译、摘要生成和字幕导出。
 
 ## 功能
 
-- B站视频音频下载（支持BV号和URL）
-- 语音识别（Qwen3-ASR-1.7B）
-- 英文翻译为中文（占位）
-- 内容摘要生成（占位）
-- RESTful API服务
+- 多平台视频下载（B站、YouTube、Twitter、TikTok、SoundCloud 等）
+- 语音识别（Qwen3-ASR-1.7B，支持可选词级时间戳）
+- 翻译为中文（OpenAI-compatible LLM）
+- 内容摘要生成
+- SRT / VTT 字幕导出
+- 处理进度实时查询
+- Web 管理界面（支持暗色主题）
 
 ## 安装
 
 ```bash
-# 克隆项目
 git clone <repo-url>
 cd STT-server
-
-# 安装依赖
 uv sync
-
-# 复制环境配置
 cp .env.example .env
 ```
 
@@ -33,9 +30,14 @@ cp .env.example .env
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
 | `BILIBILI_COOKIE` | B站Cookie（可选） | 空 |
-| `QWEN_ASR_MODEL_PATH` | 模型路径 | `Qwen/Qwen3-ASR-1.7B` |
+| `QWEN_ASR_MODEL_PATH` | STT 模型路径 | `Qwen/Qwen3-ASR-1.7B` |
+| `STT_TIMESTAMPS` | 启用时间戳（需加载对齐模型） | `false` |
+| `FORCED_ALIGNER_PATH` | 对齐模型路径 | `Qwen/Qwen3-ForcedAligner-0.6B` |
 | `LLM_PROVIDER` | LLM后端 | `openai` |
 | `OPENAI_API_KEY` | OpenAI API Key | 空 |
+| `OPENAI_BASE_URL` | OpenAI Base URL | `https://api.openai.com/v1` |
+| `LLM_MODEL` | LLM 模型名称 | `gpt-4o-mini` |
+| `STT_BACKEND` | STT后端 (default/local/remote) | `default` |
 | `PORT` | 服务端口 | `8000` |
 
 ## 运行
@@ -48,24 +50,48 @@ uv run python main.py
 
 ### POST /api/v1/process
 
-处理B站视频，返回文字稿。
+处理视频，返回文字稿。
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/process \
   -H "Content-Type: application/json" \
-  -d '{"url": "BV1xx411c7mD", "options": {"translate": false, "summarize": false}}'
+  -d '{"url": "https://www.youtube.com/watch?v=xxx", "options": {"translate": true, "summarize": true}}'
 ```
+
+### GET /api/v1/status/{bv_id}
+
+查询处理进度。
+
+```bash
+curl http://localhost:8000/api/v1/status/BV1xx411c7mD
+```
+
+### GET /api/v1/export/{bv_id}/srt
+
+导出 SRT 字幕（可选 `?part=N`）。
+
+```bash
+curl http://localhost:8000/api/v1/export/BV1xx411c7mD/srt -o subtitle.srt
+```
+
+### GET /api/v1/export/{bv_id}/vtt
+
+导出 VTT 字幕。
 
 ### GET /api/v1/health
 
-健康检查接口。
+健康检查。
 
-```bash
-curl http://localhost:8000/api/v1/health
-```
+## Web 管理界面
+
+访问 `http://localhost:8000/admin/` 查看已处理视频列表、详情、搜索、删除和重新处理。
+
+## 支持的站点
+
+B站、YouTube、Twitter/X、TikTok、Reddit、SoundCloud、Vimeo、Twitch、Instagram、网易云音乐、喜马拉雅、小宇宙等。详见 `src/utils/bv.py` 中的 `SUPPORTED_DOMAINS`。
 
 ## 测试
 
 ```bash
-uv run pytest tests/
+uv run --with pytest pytest tests/
 ```
