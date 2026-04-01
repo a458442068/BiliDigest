@@ -67,6 +67,8 @@ async def video_detail(request: Request, bv_id: str):
             part_data["summary"] = summary if summary else None
         contents.append(part_data)
 
+    is_processing = pipeline.get_progress(bv_id) is not None
+
     return templates.TemplateResponse(
         "detail.html",
         {
@@ -77,6 +79,7 @@ async def video_detail(request: Request, bv_id: str):
             "parts": parts,
             "contents": contents,
             "total_parts": total_parts,
+            "is_processing": is_processing,
         },
     )
 
@@ -112,12 +115,12 @@ def _delete_step_files(bv_id: str, step: str, part: int, total_parts: int):
     """删除指定步骤的产出文件。"""
     prefix = storage._prefix(part, total_parts)
     file_map = {
-        "stt": f"{prefix}transcript.txt",
-        "translation": f"{prefix}translation.txt",
-        "summary": f"{prefix}summary.txt",
+        "stt": [f"{prefix}transcript.txt", f"{prefix}segments.json"],
+        "translation": [f"{prefix}translation.txt"],
+        "summary": [f"{prefix}summary.txt", f"{prefix}transcript_clean.txt"],
     }
-    filename = file_map.get(step)
-    if filename:
+    filenames = file_map.get(step, [])
+    for filename in filenames:
         path = storage.get_dir(bv_id) / filename
         if path.exists():
             path.unlink()

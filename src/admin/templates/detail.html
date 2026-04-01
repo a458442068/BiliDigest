@@ -15,7 +15,7 @@
     </div>
 </div>
 
-<div x-data="progressPoller('{{ bv_id }}')" x-init="start()" x-show="status === 'processing'"
+<div x-data="progressPoller('{{ bv_id }}', {{ 'true' if is_processing else 'false' }})" x-init="start()" x-show="status === 'processing'"
      class="bg-white dark:bg-gray-800 shadow rounded-lg p-4 mb-6">
     <div class="flex items-center justify-between mb-2 text-sm">
         <span class="text-gray-700 dark:text-gray-300 font-medium">
@@ -28,9 +28,9 @@
         <div class="bg-indigo-600 h-2 rounded-full transition-all duration-300" :style="'width:' + (step_progress * 100) + '%'"></div>
     </div>
     <script>
-    function progressPoller(bvId) {
+    function progressPoller(bvId, isProcessing) {
         return {
-            status: 'processing',
+            status: isProcessing ? 'processing' : 'done',
             current_step: 'downloading',
             step_progress: 0,
             total_parts: 1,
@@ -38,6 +38,7 @@
             timer: null,
             stepLabels: { downloading: '下载中', stt: '语音识别', translating: '翻译中', summarizing: '生成摘要', done: '完成' },
             start() {
+                if (!isProcessing) return;
                 this.poll();
                 this.timer = setInterval(() => this.poll(), 2000);
             },
@@ -53,7 +54,6 @@
                         this.current_part = data.current_part;
                         if (data.status !== 'processing') {
                             clearInterval(this.timer);
-                            if (data.status === 'done') location.reload();
                         }
                     }
                 } catch(e) {}
