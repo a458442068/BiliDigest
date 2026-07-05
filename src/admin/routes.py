@@ -105,6 +105,17 @@ async def video_detail(request: Request, bv_id: str):
 
     progress = pipeline.get_progress(bv_id)
     is_processing = bool(progress and progress.status in ("queued", "processing"))
+    progress_data = (
+        progress.model_dump()
+        if progress
+        else {
+            "status": metadata.get("status", "done"),
+            "current_step": metadata.get("current_step", "done"),
+            "step_progress": metadata.get("step_progress", 1.0),
+            "total_parts": total_parts,
+            "current_part": metadata.get("current_part", 1),
+        }
+    )
 
     return templates.TemplateResponse(
         request,
@@ -118,6 +129,7 @@ async def video_detail(request: Request, bv_id: str):
             "contents": contents,
             "total_parts": total_parts,
             "is_processing": is_processing,
+            "progress": progress_data,
         },
     )
 

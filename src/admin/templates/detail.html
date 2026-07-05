@@ -23,49 +23,43 @@
 	</div>
 	{% endif %}
 	
-	<div x-data="progressPoller('{{ bv_id }}', {{ 'true' if is_processing else 'false' }})" x-init="start()" x-show="status === 'queued' || status === 'processing'"
+	<div x-data="progressPoller('{{ bv_id }}', {{ progress|tojson }})" x-show="status === 'queued' || status === 'processing'"
 	     class="bg-white dark:bg-gray-800 shadow rounded-lg p-4 mb-6">
-    <div class="flex items-center justify-between mb-2 text-sm">
-        <span class="text-gray-700 dark:text-gray-300 font-medium">
-	            <span x-text="status === 'queued' ? '排队中' : '处理中'"></span> - <span x-text="stepLabels[current_step] || current_step"></span>
-            <span x-show="total_parts > 1" x-text="'(分P ' + current_part + '/' + total_parts + ')'"></span>
-        </span>
-        <span class="text-gray-500 dark:text-gray-400" x-text="Math.round(step_progress * 100) + '%'"></span>
-    </div>
+	    <div class="flex items-center justify-between mb-2 text-sm">
+	        <span class="text-gray-700 dark:text-gray-300 font-medium">
+		            <span x-text="status === 'queued' ? '排队中' : '处理中'"></span> - <span x-text="stepLabels[current_step] || current_step"></span>
+	            <span x-show="total_parts > 1" x-text="'(分P ' + current_part + '/' + total_parts + ')'"></span>
+	        </span>
+	        <div class="flex items-center gap-3">
+	            <button type="button" @click="poll()" class="text-xs text-indigo-600 dark:text-indigo-400 hover:underline">刷新状态</button>
+	            <span class="text-gray-500 dark:text-gray-400" x-text="Math.round(step_progress * 100) + '%'"></span>
+	        </div>
+	    </div>
     <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
         <div class="bg-indigo-600 h-2 rounded-full transition-all duration-300" :style="'width:' + (step_progress * 100) + '%'"></div>
-    </div>
-    <script>
-    function progressPoller(bvId, isProcessing) {
-        return {
-	            status: isProcessing ? 'queued' : 'done',
-	            current_step: 'queued',
-            step_progress: 0,
-            total_parts: 1,
-            current_part: 1,
-            timer: null,
+	    </div>
+	    <script>
+	    function progressPoller(bvId, initialProgress) {
+	        return {
+	            status: initialProgress.status || 'done',
+	            current_step: initialProgress.current_step || 'done',
+	            step_progress: initialProgress.step_progress || 0,
+	            total_parts: initialProgress.total_parts || 1,
+	            current_part: initialProgress.current_part || 1,
 	            stepLabels: { queued: '等待开始', downloading: '下载中', stt: '语音识别', translating: '翻译中', summarizing: '生成摘要', done: '完成' },
-            start() {
-                if (!isProcessing) return;
-                this.poll();
-                this.timer = setInterval(() => this.poll(), 2000);
-            },
-            async poll() {
-                try {
-                    const res = await fetch('/api/v1/status/' + bvId);
+	            async poll() {
+	                try {
+	                    const res = await fetch('/api/v1/status/' + bvId);
                     if (res.ok) {
                         const data = await res.json();
                         this.status = data.status;
                         this.current_step = data.current_step;
-                        this.step_progress = data.step_progress;
-                        this.total_parts = data.total_parts;
-                        this.current_part = data.current_part;
-	                        if (data.status !== 'queued' && data.status !== 'processing') {
-	                            clearInterval(this.timer);
-	                        }
-                    }
-                } catch(e) {}
-            }
+	                        this.step_progress = data.step_progress;
+	                        this.total_parts = data.total_parts;
+	                        this.current_part = data.current_part;
+	                    }
+	                } catch(e) {}
+	            }
         }
     }
     </script>

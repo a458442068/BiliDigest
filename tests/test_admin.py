@@ -73,6 +73,8 @@ def test_admin_detail_shows_part_metadata(monkeypatch, tmp_path):
     assert "P1 intro" in response.text
     assert "下载 TXT" in response.text
     assert "重跑本P" in response.text
+    assert "刷新状态" in response.text
+    assert "setInterval" not in response.text
 
 
 def test_reprocess_part_marks_queued_without_real_pipeline(monkeypatch, tmp_path):
