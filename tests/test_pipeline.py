@@ -38,12 +38,20 @@ class FakeSTT:
 
 
 class FakeTranslator:
+    def __init__(self):
+        self.calls = 0
+
     async def translate(self, text: str, source_lang: str) -> str:
+        self.calls += 1
         return "你好世界"
 
 
 class FakeSummarizer:
+    def __init__(self):
+        self.calls = 0
+
     async def summarize(self, text: str) -> dict:
+        self.calls += 1
         return {"transcript_clean": text, "summary": "summary"}
 
 
@@ -155,3 +163,40 @@ def test_process_target_parts_only_reprocesses_selected_part(monkeypatch, tmp_pa
     assert metadata["parts"][1]["part"] == 2
     assert metadata["parts"][1]["language"] == "zh"
     assert metadata["parts"][1]["has_summary"] is True
+
+
+def test_process_from_summary_uses_existing_text_without_upstream_steps(
+    monkeypatch, tmp_path
+):
+    pipeline = build_pipeline(tmp_path)
+    bv_id = "BV1xx411c7mD"
+    pipeline.storage.save_metadata(
+        bv_id,
+        {
+            "bv_id": bv_id,
+            "url": f"https://www.bilibili.com/video/{bv_id}",
+            "parts": [{"part": 1, "title": "P1", "language": "en"}],
+        },
+    )
+    pipeline.storage.save_transcript(bv_id, 1, 1, "hello world")
+    pipeline.storage.save_translation(bv_id, 1, 1, "你好世界")
+    monkeypatch.setattr(
+        pipeline_module,
+        "get_parts",
+        lambda url: [PartInfo(part=1, title="P1", duration=12)],
+    )
+
+    asyncio.run(
+        pipeline.process(
+            f"https://www.bilibili.com/video/{bv_id}",
+            translate=True,
+            summarize=True,
+            from_step="summary",
+        )
+    )
+
+    assert pipeline.downloader.downloaded_parts == []
+    assert pipeline.stt.calls == 0
+    assert pipeline.translator.calls == 0
+    assert pipeline.summarizer.calls == 1
+    assert pipeline.storage.load_summary(bv_id, 1, 1)["summary"] == "summary"

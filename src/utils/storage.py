@@ -6,6 +6,7 @@ from pathlib import Path
 from loguru import logger
 
 from src.config import settings
+from src.models.domain import ArtifactKind, ProcessingStep
 
 
 SAFE_BV_ID_PATTERN = re.compile(r"^(BV[1-9A-HJ-NP-Za-km-z]{10}|[0-9a-f]{12})$")
@@ -39,102 +40,194 @@ class ResultStorage:
             return f"P{part}_"
         return ""
 
+    def artifact_path(
+        self, bv_id: str, part: int, total_parts: int, kind: ArtifactKind | str
+    ) -> Path:
+        kind = ArtifactKind(kind)
+        filenames = {
+            ArtifactKind.AUDIO: "audio.wav",
+            ArtifactKind.SEGMENTS: "segments.json",
+            ArtifactKind.TRANSCRIPT: "transcript.txt",
+            ArtifactKind.TRANSLATION: "translation.txt",
+            ArtifactKind.SUMMARY: "summary.txt",
+            ArtifactKind.TRANSCRIPT_CLEAN: "transcript_clean.txt",
+        }
+        return (
+            self.get_dir(bv_id)
+            / f"{self._prefix(part, total_parts)}{filenames[kind]}"
+        )
+
+    def artifact_exists(
+        self, bv_id: str, part: int, total_parts: int, kind: ArtifactKind | str
+    ) -> bool:
+        return self.artifact_path(bv_id, part, total_parts, kind).exists()
+
+    def list_part_artifacts(
+        self, bv_id: str, part: int, total_parts: int
+    ) -> dict[str, bool]:
+        return {
+            kind.value: self.artifact_exists(bv_id, part, total_parts, kind)
+            for kind in ArtifactKind
+        }
+
+    def load_artifact(
+        self, bv_id: str, part: int, total_parts: int, kind: ArtifactKind | str
+    ):
+        kind = ArtifactKind(kind)
+        path = self.artifact_path(bv_id, part, total_parts, kind)
+        if kind == ArtifactKind.SEGMENTS:
+            return json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
+        if kind == ArtifactKind.AUDIO:
+            return str(path)
+        return path.read_text(encoding="utf-8")
+
+    def save_artifact(
+        self,
+        bv_id: str,
+        part: int,
+        total_parts: int,
+        kind: ArtifactKind | str,
+        content,
+    ):
+        kind = ArtifactKind(kind)
+        path = self.artifact_path(bv_id, part, total_parts, kind)
+        if kind == ArtifactKind.AUDIO:
+            shutil.copy2(content, path)
+            logger.info(f"已保存音频: {path}")
+            return str(path)
+        if kind == ArtifactKind.SEGMENTS:
+            path.write_text(json.dumps(content, ensure_ascii=False), encoding="utf-8")
+            logger.info(f"已保存时间戳: {path}")
+            return path
+        path.write_text(str(content), encoding="utf-8")
+        logger.info(f"已保存产物 {kind.value}: {path}")
+        return path
+
+    def delete_artifacts(
+        self,
+        bv_id: str,
+        part: int,
+        total_parts: int,
+        from_step: ProcessingStep | str,
+    ) -> list[Path]:
+        from_step = ProcessingStep(from_step)
+        kinds_by_step = {
+            ProcessingStep.DOWNLOAD: [
+                ArtifactKind.AUDIO,
+                ArtifactKind.SEGMENTS,
+                ArtifactKind.TRANSCRIPT,
+                ArtifactKind.TRANSLATION,
+                ArtifactKind.SUMMARY,
+                ArtifactKind.TRANSCRIPT_CLEAN,
+            ],
+            ProcessingStep.STT: [
+                ArtifactKind.SEGMENTS,
+                ArtifactKind.TRANSCRIPT,
+                ArtifactKind.TRANSLATION,
+                ArtifactKind.SUMMARY,
+                ArtifactKind.TRANSCRIPT_CLEAN,
+            ],
+            ProcessingStep.TRANSLATION: [
+                ArtifactKind.TRANSLATION,
+                ArtifactKind.SUMMARY,
+                ArtifactKind.TRANSCRIPT_CLEAN,
+            ],
+            ProcessingStep.SUMMARY: [
+                ArtifactKind.SUMMARY,
+                ArtifactKind.TRANSCRIPT_CLEAN,
+            ],
+        }
+        deleted = []
+        for kind in kinds_by_step[from_step]:
+            path = self.artifact_path(bv_id, part, total_parts, kind)
+            if path.exists():
+                path.unlink()
+                deleted.append(path)
+        return deleted
+
     def has_audio(self, bv_id: str, part: int, total_parts: int) -> bool:
-        prefix = self._prefix(part, total_parts)
-        return (self.get_dir(bv_id) / f"{prefix}audio.wav").exists()
+        return self.artifact_exists(bv_id, part, total_parts, ArtifactKind.AUDIO)
 
     def has_transcript(self, bv_id: str, part: int, total_parts: int) -> bool:
-        prefix = self._prefix(part, total_parts)
-        return (self.get_dir(bv_id) / f"{prefix}transcript.txt").exists()
+        return self.artifact_exists(bv_id, part, total_parts, ArtifactKind.TRANSCRIPT)
 
     def has_translation(self, bv_id: str, part: int, total_parts: int) -> bool:
-        prefix = self._prefix(part, total_parts)
-        return (self.get_dir(bv_id) / f"{prefix}translation.txt").exists()
+        return self.artifact_exists(bv_id, part, total_parts, ArtifactKind.TRANSLATION)
 
     def has_summary(self, bv_id: str, part: int, total_parts: int) -> bool:
-        prefix = self._prefix(part, total_parts)
-        return (self.get_dir(bv_id) / f"{prefix}summary.txt").exists()
+        return self.artifact_exists(bv_id, part, total_parts, ArtifactKind.SUMMARY)
 
     def get_audio_path(self, bv_id: str, part: int, total_parts: int) -> str:
-        prefix = self._prefix(part, total_parts)
-        return str(self.get_dir(bv_id) / f"{prefix}audio.wav")
+        return self.load_artifact(bv_id, part, total_parts, ArtifactKind.AUDIO)
 
     def save_audio(
         self, bv_id: str, part: int, total_parts: int, audio_path: str
     ) -> str:
-        prefix = self._prefix(part, total_parts)
-        dest = self.get_dir(bv_id) / f"{prefix}audio.wav"
-        shutil.copy2(audio_path, dest)
-        logger.info(f"已保存音频: {dest}")
-        return str(dest)
+        return self.save_artifact(
+            bv_id, part, total_parts, ArtifactKind.AUDIO, audio_path
+        )
 
     def save_transcript(self, bv_id: str, part: int, total_parts: int, transcript: str):
-        prefix = self._prefix(part, total_parts)
-        path = self.get_dir(bv_id) / f"{prefix}transcript.txt"
-        path.write_text(transcript, encoding="utf-8")
-        logger.info(f"已保存文字稿: {path}")
+        self.save_artifact(
+            bv_id, part, total_parts, ArtifactKind.TRANSCRIPT, transcript
+        )
 
     def has_segments(self, bv_id: str, part: int, total_parts: int) -> bool:
-        prefix = self._prefix(part, total_parts)
-        return (self.get_dir(bv_id) / f"{prefix}segments.json").exists()
+        return self.artifact_exists(bv_id, part, total_parts, ArtifactKind.SEGMENTS)
 
     def save_segments(self, bv_id: str, part: int, total_parts: int, segments: list):
-        prefix = self._prefix(part, total_parts)
-        path = self.get_dir(bv_id) / f"{prefix}segments.json"
-        path.write_text(json.dumps(segments, ensure_ascii=False), encoding="utf-8")
-        logger.info(f"已保存时间戳: {path}")
+        self.save_artifact(bv_id, part, total_parts, ArtifactKind.SEGMENTS, segments)
 
     def load_segments(self, bv_id: str, part: int, total_parts: int) -> list:
-        prefix = self._prefix(part, total_parts)
-        path = self.get_dir(bv_id) / f"{prefix}segments.json"
-        if path.exists():
-            return json.loads(path.read_text(encoding="utf-8"))
-        return []
+        return self.load_artifact(bv_id, part, total_parts, ArtifactKind.SEGMENTS)
 
     def save_translation(
         self, bv_id: str, part: int, total_parts: int, translation: str
     ):
-        prefix = self._prefix(part, total_parts)
-        path = self.get_dir(bv_id) / f"{prefix}translation.txt"
-        path.write_text(translation, encoding="utf-8")
-        logger.info(f"已保存翻译: {path}")
+        self.save_artifact(
+            bv_id, part, total_parts, ArtifactKind.TRANSLATION, translation
+        )
 
     def save_summary(
         self, bv_id: str, part: int, total_parts: int, summary_data: dict | str
     ):
-        prefix = self._prefix(part, total_parts)
         if isinstance(summary_data, dict):
             # Save transcript_clean
             if summary_data.get("transcript_clean"):
-                path = self.get_dir(bv_id) / f"{prefix}transcript_clean.txt"
-                path.write_text(summary_data["transcript_clean"], encoding="utf-8")
-                logger.info(f"已保存整理版文字稿: {path}")
+                self.save_artifact(
+                    bv_id,
+                    part,
+                    total_parts,
+                    ArtifactKind.TRANSCRIPT_CLEAN,
+                    summary_data["transcript_clean"],
+                )
             # Save summary
             if summary_data.get("summary"):
-                path = self.get_dir(bv_id) / f"{prefix}summary.txt"
-                path.write_text(summary_data["summary"], encoding="utf-8")
-                logger.info(f"已保存摘要: {path}")
+                self.save_artifact(
+                    bv_id,
+                    part,
+                    total_parts,
+                    ArtifactKind.SUMMARY,
+                    summary_data["summary"],
+                )
         else:
-            path = self.get_dir(bv_id) / f"{prefix}summary.txt"
-            path.write_text(str(summary_data), encoding="utf-8")
-            logger.info(f"已保存摘要: {path}")
+            self.save_artifact(
+                bv_id, part, total_parts, ArtifactKind.SUMMARY, summary_data
+            )
 
     def load_transcript(self, bv_id: str, part: int, total_parts: int) -> str:
-        prefix = self._prefix(part, total_parts)
-        return (self.get_dir(bv_id) / f"{prefix}transcript.txt").read_text(
-            encoding="utf-8"
-        )
+        return self.load_artifact(bv_id, part, total_parts, ArtifactKind.TRANSCRIPT)
 
     def load_translation(self, bv_id: str, part: int, total_parts: int) -> str:
-        prefix = self._prefix(part, total_parts)
-        return (self.get_dir(bv_id) / f"{prefix}translation.txt").read_text(
-            encoding="utf-8"
-        )
+        return self.load_artifact(bv_id, part, total_parts, ArtifactKind.TRANSLATION)
 
     def load_summary(self, bv_id: str, part: int, total_parts: int) -> dict | str:
-        prefix = self._prefix(part, total_parts)
-        summary_path = self.get_dir(bv_id) / f"{prefix}summary.txt"
-        clean_path = self.get_dir(bv_id) / f"{prefix}transcript_clean.txt"
+        summary_path = self.artifact_path(
+            bv_id, part, total_parts, ArtifactKind.SUMMARY
+        )
+        clean_path = self.artifact_path(
+            bv_id, part, total_parts, ArtifactKind.TRANSCRIPT_CLEAN
+        )
         result = {}
         if clean_path.exists():
             result["transcript_clean"] = clean_path.read_text(encoding="utf-8")
@@ -148,12 +241,24 @@ class ResultStorage:
             return json.loads(path.read_text(encoding="utf-8"))
         return {}
 
+    def load_video_metadata(self, bv_id: str) -> dict:
+        return self.load_metadata(bv_id)
+
     def save_metadata(self, bv_id: str, metadata: dict):
         path = self.get_dir(bv_id) / "metadata.json"
         path.write_text(
             json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8"
         )
         logger.info(f"已更新metadata: {path}")
+
+    def save_video_metadata(self, bv_id: str, metadata: dict):
+        self.save_metadata(bv_id, metadata)
+
+    def merge_video_metadata(self, bv_id: str, patch: dict) -> dict:
+        metadata = self.load_metadata(bv_id)
+        metadata.update(patch)
+        self.save_metadata(bv_id, metadata)
+        return metadata
 
     def _dir_size(self, path: Path) -> int:
         return sum(f.stat().st_size for f in path.rglob("*") if f.is_file())

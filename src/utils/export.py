@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 
+from src.models.domain import ArtifactKind
 from src.utils.storage import ResultStorage
 from src.utils.subtitle import (
     segments_to_srt,
@@ -67,33 +68,32 @@ class ExportService:
         )
 
     def part_texts(self, context: ExportContext) -> dict:
-        def read_or_none(loader):
+        def read_or_none(kind: ArtifactKind):
             try:
-                return loader(context.bv_id, context.part, context.total_parts)
+                return self.storage.load_artifact(
+                    context.bv_id, context.part, context.total_parts, kind
+                )
             except FileNotFoundError:
                 return None
 
-        summary_data = self.storage.load_summary(
-            context.bv_id, context.part, context.total_parts
-        )
-        if not isinstance(summary_data, dict):
-            summary_data = {"summary": summary_data} if summary_data else {}
         return {
-            "transcript": read_or_none(self.storage.load_transcript),
-            "translation": read_or_none(self.storage.load_translation),
-            "transcript_clean": summary_data.get("transcript_clean"),
-            "summary": summary_data.get("summary"),
+            "transcript": read_or_none(ArtifactKind.TRANSCRIPT),
+            "translation": read_or_none(ArtifactKind.TRANSLATION),
+            "transcript_clean": read_or_none(ArtifactKind.TRANSCRIPT_CLEAN),
+            "summary": read_or_none(ArtifactKind.SUMMARY),
         }
 
     def srt(self, bv_id: str, part: int) -> str:
         context = self.load_context(bv_id, part)
-        segments = self.storage.load_segments(bv_id, part, context.total_parts)
+        segments = self.storage.load_artifact(
+            bv_id, part, context.total_parts, ArtifactKind.SEGMENTS
+        )
         if segments:
             content = segments_to_srt(segments)
         else:
             try:
-                transcript = self.storage.load_transcript(
-                    bv_id, part, context.total_parts
+                transcript = self.storage.load_artifact(
+                    bv_id, part, context.total_parts, ArtifactKind.TRANSCRIPT
                 )
             except FileNotFoundError as e:
                 raise ExportNotFound("无可用字幕数据") from e
@@ -106,13 +106,15 @@ class ExportService:
 
     def vtt(self, bv_id: str, part: int) -> str:
         context = self.load_context(bv_id, part)
-        segments = self.storage.load_segments(bv_id, part, context.total_parts)
+        segments = self.storage.load_artifact(
+            bv_id, part, context.total_parts, ArtifactKind.SEGMENTS
+        )
         if segments:
             content = segments_to_vtt(segments)
         else:
             try:
-                transcript = self.storage.load_transcript(
-                    bv_id, part, context.total_parts
+                transcript = self.storage.load_artifact(
+                    bv_id, part, context.total_parts, ArtifactKind.TRANSCRIPT
                 )
             except FileNotFoundError as e:
                 raise ExportNotFound("无可用字幕数据") from e

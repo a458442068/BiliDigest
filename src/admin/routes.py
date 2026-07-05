@@ -6,6 +6,7 @@ from fastapi.templating import Jinja2Templates
 
 from src.api.routes import pipeline
 from src.admin.view_models import build_detail_context, build_video_list
+from src.models.domain import ProcessingRequest
 from src.utils.storage import ResultStorage
 
 router = APIRouter(prefix="/admin")
@@ -65,32 +66,18 @@ async def video_reprocess(bv_id: str, background_tasks: BackgroundTasks):
     url = metadata.get("url", f"https://www.bilibili.com/video/{bv_id}")
     pipeline.mark_queued(bv_id, len(metadata.get("parts", [])) or 1)
     background_tasks.add_task(
-        pipeline.process,
-        url=url,
-        translate=True,
-        summarize=True,
-        force=True,
+        pipeline.process_request,
+        ProcessingRequest(
+            url=url,
+            translate=True,
+            summarize=True,
+            force=True,
+        ),
     )
     return RedirectResponse(url=f"/admin/video/{bv_id}", status_code=303)
 
 
-# 从指定步骤开始重跑：删除该步骤及下游文件，再 force 重跑
 _STEPS_SEQUENCE = ["download", "stt", "translation", "summary"]
-
-
-def _delete_step_files(bv_id: str, step: str, part: int, total_parts: int):
-    """删除指定步骤的产出文件。"""
-    prefix = storage._prefix(part, total_parts)
-    file_map = {
-        "stt": [f"{prefix}transcript.txt", f"{prefix}segments.json"],
-        "translation": [f"{prefix}translation.txt"],
-        "summary": [f"{prefix}summary.txt", f"{prefix}transcript_clean.txt"],
-    }
-    filenames = file_map.get(step, [])
-    for filename in filenames:
-        path = storage.get_dir(bv_id) / filename
-        if path.exists():
-            path.unlink()
 
 
 @router.post("/video/{bv_id}/reprocess/{from_step}")
@@ -111,21 +98,19 @@ async def video_reprocess_from(
     if part is not None and (part < 1 or part > total_parts):
         raise HTTPException(status_code=400, detail=f"分P不存在: {part}")
 
-    # 删除 from_step 及其下游步骤的文件
-    start_idx = _STEPS_SEQUENCE.index(from_step)
-    for step in _STEPS_SEQUENCE[start_idx:]:
-        if step == "download":
-            continue  # 不删除音频，让 pipeline 跳过下载
-        for part_num in target_parts:
-            _delete_step_files(bv_id, step, part_num, total_parts)
+    for part_num in target_parts:
+        storage.delete_artifacts(bv_id, part_num, total_parts, from_step)
 
     url = metadata.get("url", f"https://www.bilibili.com/video/{bv_id}")
     pipeline.mark_queued(bv_id, total_parts)
     background_tasks.add_task(
-        pipeline.process,
-        url=url,
-        translate=True,
-        summarize=True,
-        target_parts={part} if part is not None else None,
+        pipeline.process_request,
+        ProcessingRequest(
+            url=url,
+            translate=True,
+            summarize=True,
+            target_parts={part} if part is not None else None,
+            from_step=from_step,
+        ),
     )
     return RedirectResponse(url=f"/admin/video/{bv_id}", status_code=303)
