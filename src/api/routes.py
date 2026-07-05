@@ -66,20 +66,6 @@ async def get_progress(bv_id: str):
     progress = pipeline.get_progress(bv_id)
     if progress:
         return progress
-    # 没有活跃进度 → 检查是否已处理完成
-    from src.utils.storage import ResultStorage
-
-    storage = ResultStorage()
-    metadata = storage.load_metadata(bv_id)
-    if metadata:
-        return ProgressInfo(
-            bv_id=bv_id,
-            status="done",
-            current_step="done",
-            step_progress=1.0,
-            total_parts=len(metadata.get("parts", [])) or 1,
-            current_part=1,
-        )
     raise HTTPException(status_code=404, detail="视频不存在")
 
 
@@ -89,7 +75,10 @@ async def export_srt(bv_id: str, part: int = Query(default=1)):
     from src.utils.subtitle import segments_to_srt, transcript_to_srt
 
     storage = ResultStorage()
-    metadata = storage.load_metadata(bv_id)
+    try:
+        metadata = storage.load_metadata(bv_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     if not metadata:
         raise HTTPException(status_code=404, detail="视频不存在")
 
@@ -119,7 +108,10 @@ async def export_vtt(bv_id: str, part: int = Query(default=1)):
     from src.utils.subtitle import segments_to_vtt, transcript_to_vtt
 
     storage = ResultStorage()
-    metadata = storage.load_metadata(bv_id)
+    try:
+        metadata = storage.load_metadata(bv_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     if not metadata:
         raise HTTPException(status_code=404, detail="视频不存在")
 

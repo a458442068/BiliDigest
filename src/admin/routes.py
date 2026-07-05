@@ -13,6 +13,16 @@ templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 storage = ResultStorage()
 
 
+def _load_metadata_or_404(bv_id: str) -> dict:
+    try:
+        metadata = storage.load_metadata(bv_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if not metadata:
+        raise HTTPException(status_code=404, detail="视频不存在")
+    return metadata
+
+
 @router.get("/", response_class=HTMLResponse)
 async def video_list(
     request: Request, q: str = "", sort: str = "updated_at", order: str = "desc"
@@ -38,9 +48,7 @@ async def video_list(
 
 @router.get("/video/{bv_id}", response_class=HTMLResponse)
 async def video_detail(request: Request, bv_id: str):
-    metadata = storage.load_metadata(bv_id)
-    if not metadata:
-        raise HTTPException(status_code=404, detail="视频不存在")
+    metadata = _load_metadata_or_404(bv_id)
 
     parts = metadata.get("parts", [])
     total_parts = len(parts)
@@ -67,7 +75,8 @@ async def video_detail(request: Request, bv_id: str):
             part_data["summary"] = summary if summary else None
         contents.append(part_data)
 
-    is_processing = pipeline.get_progress(bv_id) is not None
+    progress = pipeline.get_progress(bv_id)
+    is_processing = bool(progress and progress.status in ("queued", "processing"))
 
     return templates.TemplateResponse(
         "detail.html",
@@ -86,17 +95,20 @@ async def video_detail(request: Request, bv_id: str):
 
 @router.post("/video/{bv_id}/delete")
 async def video_delete(bv_id: str):
-    if not storage.delete_video(bv_id):
+    try:
+        deleted = storage.delete_video(bv_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if not deleted:
         raise HTTPException(status_code=404, detail="视频不存在")
     return RedirectResponse(url="/admin/", status_code=303)
 
 
 @router.post("/video/{bv_id}/reprocess")
 async def video_reprocess(bv_id: str, background_tasks: BackgroundTasks):
-    metadata = storage.load_metadata(bv_id)
-    if not metadata:
-        raise HTTPException(status_code=404, detail="视频不存在")
+    metadata = _load_metadata_or_404(bv_id)
     url = metadata.get("url", f"https://www.bilibili.com/video/{bv_id}")
+    pipeline.mark_queued(bv_id, len(metadata.get("parts", [])) or 1)
     background_tasks.add_task(
         pipeline.process,
         url=url,
@@ -133,9 +145,7 @@ async def video_reprocess_from(
     if from_step not in _STEPS_SEQUENCE:
         raise HTTPException(status_code=400, detail=f"无效的步骤: {from_step}")
 
-    metadata = storage.load_metadata(bv_id)
-    if not metadata:
-        raise HTTPException(status_code=404, detail="视频不存在")
+    metadata = _load_metadata_or_404(bv_id)
 
     parts = metadata.get("parts", [])
     total_parts = len(parts) or 1
@@ -149,6 +159,7 @@ async def video_reprocess_from(
             _delete_step_files(bv_id, step, part, total_parts)
 
     url = metadata.get("url", f"https://www.bilibili.com/video/{bv_id}")
+    pipeline.mark_queued(bv_id, total_parts)
     background_tasks.add_task(
         pipeline.process,
         url=url,

@@ -45,13 +45,76 @@ class ProcessingPipeline:
         self._progress: dict[str, ProgressInfo] = {}
 
     def get_progress(self, bv_id: str) -> ProgressInfo | None:
-        return self._progress.get(bv_id)
+        if bv_id in self._progress:
+            return self._progress[bv_id]
+        try:
+            metadata = self.storage.load_metadata(bv_id)
+        except ValueError:
+            return None
+        if not metadata:
+            return None
+        return self._progress_from_metadata(bv_id, metadata)
+
+    def mark_queued(self, bv_id: str, total_parts: int = 1):
+        self._progress[bv_id] = ProgressInfo(
+            bv_id=bv_id,
+            status="queued",
+            current_step="queued",
+            step_progress=0.0,
+            total_parts=total_parts,
+            current_part=1,
+        )
+        self._persist_progress(bv_id)
 
     def _set_progress(self, bv_id: str, **kwargs):
         if bv_id in self._progress:
             info = self._progress[bv_id]
             for k, v in kwargs.items():
                 setattr(info, k, v)
+            self._persist_progress(bv_id)
+
+    def _progress_from_metadata(self, bv_id: str, metadata: dict) -> ProgressInfo:
+        status = metadata.get("status") or "done"
+        total_parts = metadata.get("total_parts") or len(metadata.get("parts", [])) or 1
+        current_step = metadata.get("current_step") or (
+            "done" if status == "done" else "queued"
+        )
+        step_progress = metadata.get("step_progress")
+        if step_progress is None:
+            step_progress = 1.0 if status == "done" else 0.0
+        return ProgressInfo(
+            bv_id=bv_id,
+            status=status,
+            current_step=current_step,
+            step_progress=step_progress,
+            total_parts=total_parts,
+            current_part=metadata.get("current_part") or 1,
+            error=metadata.get("error"),
+        )
+
+    def _persist_progress(self, bv_id: str):
+        info = self._progress.get(bv_id)
+        if not info:
+            return
+        metadata = self.storage.load_metadata(bv_id)
+        metadata.update(
+            {
+                "bv_id": bv_id,
+                "status": info.status,
+                "current_step": info.current_step,
+                "step_progress": info.step_progress,
+                "total_parts": info.total_parts,
+                "current_part": info.current_part,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+        if info.error:
+            metadata["error"] = info.error
+        else:
+            metadata.pop("error", None)
+        if "created_at" not in metadata:
+            metadata["created_at"] = metadata["updated_at"]
+        self.storage.save_metadata(bv_id, metadata)
 
     async def process(
         self,
@@ -62,6 +125,7 @@ class ProcessingPipeline:
     ) -> dict:
         bv_id = extract_video_id(url)
         video_url = validate_input(url)
+        self.mark_queued(bv_id)
 
         # Get video info
         video_info = await _to_thread(self.downloader.get_video_info, url)
@@ -70,14 +134,12 @@ class ProcessingPipeline:
         parts = await _to_thread(get_parts, url)
         total_parts = len(parts)
 
-        # Initialize progress
-        self._progress[bv_id] = ProgressInfo(
-            bv_id=bv_id,
+        self._set_progress(
+            bv_id,
             status="processing",
             current_step="downloading",
             step_progress=0.0,
             total_parts=total_parts,
-            current_part=1,
         )
 
         try:
@@ -92,11 +154,22 @@ class ProcessingPipeline:
                 force,
                 video_info,
             )
-        except Exception:
-            self._set_progress(bv_id, status="error", error="处理失败")
+        except Exception as e:
+            error_message = getattr(e, "message", str(e)) or "处理失败"
+            error_step = getattr(e, "stage", "unknown")
+            self._set_progress(
+                bv_id,
+                status="error",
+                current_step=error_step,
+                step_progress=0.0,
+                error=error_message,
+            )
             raise
         finally:
-            if bv_id in self._progress and self._progress[bv_id].status == "processing":
+            if bv_id in self._progress and self._progress[bv_id].status in (
+                "queued",
+                "processing",
+            ):
                 self._set_progress(
                     bv_id, status="done", current_step="done", step_progress=1.0
                 )
@@ -369,12 +442,16 @@ class ProcessingPipeline:
                 "url": url,
                 "bv_id": bv_id,
                 "source": get_source_name(url),
-                "video": video_info or {},
                 "stt_model": settings.qwen_asr_model_path,
                 "llm_model": self._get_current_llm_model(),
+                "total_parts": len(parts) or 1,
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             }
         )
+        if video_info:
+            metadata["video"] = video_info
+        elif "video" not in metadata:
+            metadata["video"] = {}
         if "created_at" not in metadata:
             metadata["created_at"] = metadata["updated_at"]
 

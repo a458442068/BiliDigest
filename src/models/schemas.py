@@ -40,9 +40,9 @@ class ProcessResult(BaseModel):
 
 class ProgressInfo(BaseModel):
     bv_id: str
-    status: str = Field(description="processing | done | error")
+    status: str = Field(description="queued | processing | done | error")
     current_step: str = Field(
-        description="downloading | stt | translating | summarizing | done"
+        description="queued | downloading | stt | translating | summarizing | done"
     )
     step_progress: float = Field(default=0.0, description="当前步骤进度 0.0~1.0")
     total_parts: int = 1
