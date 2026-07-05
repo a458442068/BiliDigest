@@ -23,6 +23,9 @@ class BilibiliDownloader:
             "--dump-json",
             "--no-download",
             "--no-warnings",
+            "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+            "--add-header", "Referer:https://www.bilibili.com",
+            "--add-header", "Origin:https://www.bilibili.com",
             video_url,
         ]
         try:
@@ -71,6 +74,11 @@ class BilibiliDownloader:
             cookie_file.write_text(settings.bilibili_cookie)
             cmd.extend(["--cookies", str(cookie_file)])
 
+        cmd.extend([
+            "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+            "--add-header", "Referer:https://www.bilibili.com",
+            "--add-header", "Origin:https://www.bilibili.com",
+        ])
         cmd.append(video_url)
 
         logger.info(f"开始下载: {video_url} (分P: {part})")
