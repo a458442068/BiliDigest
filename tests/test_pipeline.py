@@ -2,7 +2,9 @@ import asyncio
 from pathlib import Path
 
 from src.exceptions import DownloadError
+from src.services import pipeline as pipeline_module
 from src.services.pipeline import ProcessingPipeline
+from src.utils.bv import PartInfo
 from src.utils.storage import ResultStorage
 
 
@@ -10,6 +12,7 @@ class FakeDownloader:
     def __init__(self, audio_path: Path | None = None, fail_download: bool = False):
         self.audio_path = audio_path
         self.fail_download = fail_download
+        self.downloaded_parts = []
 
     def get_video_info(self, url: str) -> dict:
         return {"title": "Demo", "uploader": "Tester", "duration": 12}
@@ -17,11 +20,16 @@ class FakeDownloader:
     def download(self, url: str, part: int = 1) -> str:
         if self.fail_download:
             raise DownloadError("DOWNLOAD_FAILED", "fake failure")
+        self.downloaded_parts.append(part)
         return str(self.audio_path)
 
 
 class FakeSTT:
+    def __init__(self):
+        self.calls = 0
+
     def transcribe(self, audio_path: str) -> dict:
+        self.calls += 1
         return {
             "transcript": "hello world",
             "language": "en",
@@ -94,3 +102,52 @@ def test_process_persists_error_status(tmp_path):
     assert metadata["status"] == "error"
     assert metadata["current_step"] == "download"
     assert metadata["error"] == "fake failure"
+
+
+def test_process_target_parts_only_reprocesses_selected_part(monkeypatch, tmp_path):
+    pipeline = build_pipeline(tmp_path)
+    bv_id = "BV1xx411c7mD"
+    pipeline.storage.save_metadata(
+        bv_id,
+        {
+            "bv_id": bv_id,
+            "url": f"https://www.bilibili.com/video/{bv_id}",
+            "parts": [
+                {"part": 1, "title": "P1", "language": "en"},
+                {
+                    "part": 2,
+                    "title": "P2",
+                    "language": "zh",
+                    "has_transcript": True,
+                    "has_translation": True,
+                    "has_summary": True,
+                },
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        pipeline_module,
+        "get_parts",
+        lambda url: [
+            PartInfo(part=1, title="P1", duration=12),
+            PartInfo(part=2, title="P2", duration=34),
+        ],
+    )
+
+    asyncio.run(
+        pipeline.process(
+            f"https://www.bilibili.com/video/{bv_id}",
+            translate=True,
+            summarize=True,
+            target_parts={1},
+        )
+    )
+    metadata = pipeline.storage.load_metadata(bv_id)
+
+    assert pipeline.downloader.downloaded_parts == [1]
+    assert pipeline.stt.calls == 1
+    assert metadata["parts"][0]["part"] == 1
+    assert metadata["parts"][0]["has_transcript"] is True
+    assert metadata["parts"][1]["part"] == 2
+    assert metadata["parts"][1]["language"] == "zh"
+    assert metadata["parts"][1]["has_summary"] is True

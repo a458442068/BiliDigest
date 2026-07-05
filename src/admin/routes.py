@@ -212,5 +212,6 @@ async def video_reprocess_from(
         url=url,
         translate=True,
         summarize=True,
+        target_parts={part} if part is not None else None,
     )
     return RedirectResponse(url=f"/admin/video/{bv_id}", status_code=303)

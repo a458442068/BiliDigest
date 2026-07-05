@@ -80,8 +80,10 @@ def test_admin_detail_shows_part_metadata(monkeypatch, tmp_path):
 def test_reprocess_part_marks_queued_without_real_pipeline(monkeypatch, tmp_path):
     storage = patch_storage(monkeypatch, tmp_path)
     bv_id = seed_video(storage)
+    captured = {}
 
     async def fake_process(**kwargs):
+        captured.update(kwargs)
         return {}
 
     monkeypatch.setattr(admin_routes.pipeline, "process", fake_process)
@@ -92,6 +94,7 @@ def test_reprocess_part_marks_queued_without_real_pipeline(monkeypatch, tmp_path
 
     assert response.status_code == 303
     assert storage.load_metadata(bv_id)["status"] == "queued"
+    assert captured["target_parts"] == {1}
 
 
 def test_export_txt_md_json(monkeypatch, tmp_path):

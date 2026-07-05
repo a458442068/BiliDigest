@@ -122,32 +122,47 @@ class ProcessingPipeline:
         translate: bool = False,
         summarize: bool = False,
         force: bool = False,
+        target_parts: set[int] | None = None,
     ) -> dict:
         bv_id = extract_video_id(url)
         video_url = validate_input(url)
         self.mark_queued(bv_id)
 
-        # Get video info
-        video_info = await _to_thread(self.downloader.get_video_info, url)
-
-        # Get parts info
-        parts = await _to_thread(get_parts, url)
-        total_parts = len(parts)
-
-        self._set_progress(
-            bv_id,
-            status="processing",
-            current_step="downloading",
-            step_progress=0.0,
-            total_parts=total_parts,
-        )
-
         try:
+            # Get video info
+            video_info = await _to_thread(self.downloader.get_video_info, url)
+
+            # Get parts info
+            parts = await _to_thread(get_parts, url)
+            total_parts = len(parts)
+            part_numbers = {part.part for part in parts}
+            selected_parts = parts
+            if target_parts is not None:
+                invalid_parts = sorted(target_parts - part_numbers)
+                if invalid_parts:
+                    raise ProcessError(
+                        "process",
+                        "INVALID_PART",
+                        f"分P不存在: {', '.join(str(p) for p in invalid_parts)}",
+                    )
+                if not target_parts:
+                    raise ProcessError("process", "INVALID_PART", "未选择分P")
+                selected_parts = [part for part in parts if part.part in target_parts]
+
+            self._set_progress(
+                bv_id,
+                status="processing",
+                current_step="downloading",
+                step_progress=0.0,
+                total_parts=total_parts,
+            )
+
             return await self._process_inner(
                 bv_id,
                 video_url,
                 url,
                 parts,
+                selected_parts,
                 total_parts,
                 translate,
                 summarize,
@@ -180,6 +195,7 @@ class ProcessingPipeline:
         video_url: str,
         url: str,
         parts: list,
+        selected_parts: list,
         total_parts: int,
         translate: bool,
         summarize: bool,
@@ -192,14 +208,19 @@ class ProcessingPipeline:
 
         # Check config changes
         if not force and metadata:
-            self._handle_config_changes(bv_id, metadata, total_parts)
+            self._handle_config_changes(
+                bv_id,
+                metadata,
+                total_parts,
+                [part.part for part in selected_parts],
+            )
 
         # 写入初始 metadata（has_* 全为 false，admin 页面可见处理中状态）
         await _to_thread(self._update_metadata, bv_id, video_url, [], parts, video_info)
 
         results = []
 
-        for part_info in parts:
+        for part_info in selected_parts:
             part = part_info.part
             self._set_progress(bv_id, current_part=part)
             part_result = await self._process_part(
@@ -400,7 +421,9 @@ class ProcessingPipeline:
         except STTError as e:
             raise ProcessError("stt", e.code, e.message)
 
-    def _handle_config_changes(self, bv_id: str, metadata: dict, total_parts: int):
+    def _handle_config_changes(
+        self, bv_id: str, metadata: dict, total_parts: int, target_parts: list[int]
+    ):
         old_stt = metadata.get("stt_model")
         old_llm = metadata.get("llm_model")
 
@@ -412,7 +435,7 @@ class ProcessingPipeline:
 
         logger.info(f"检测到配置变化: stt={stt_changed}, llm={llm_changed}")
 
-        for part in range(1, total_parts + 1):
+        for part in target_parts:
             if stt_changed:
                 self.storage.rename_old_file(
                     bv_id, part, total_parts, "transcript", old_stt.split("/")[-1]
