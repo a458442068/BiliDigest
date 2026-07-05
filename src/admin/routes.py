@@ -4,8 +4,8 @@ from fastapi import APIRouter, Request, BackgroundTasks, HTTPException, Query
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from src.config import settings
 from src.api.routes import pipeline
+from src.admin.view_models import build_detail_context, build_video_list
 from src.utils.storage import ResultStorage
 
 router = APIRouter(prefix="/admin")
@@ -23,38 +23,11 @@ def _load_metadata_or_404(bv_id: str) -> dict:
     return metadata
 
 
-def _sort_value(video: dict, field: str):
-    value = video.get(field)
-    return (value is None, value)
-
-
 @router.get("/", response_class=HTMLResponse)
 async def video_list(
     request: Request, q: str = "", sort: str = "updated_at", order: str = "desc"
 ):
-    videos = storage.list_videos()
-    if q:
-        q_lower = q.lower()
-        videos = [
-            v
-            for v in videos
-            if q_lower in v["title"].lower() or q_lower in v["uploader"].lower()
-        ]
-    sortable_fields = (
-        "updated_at",
-        "title",
-        "source",
-        "uploader",
-        "duration",
-        "language",
-        "status",
-        "size_bytes",
-    )
-    if sort in sortable_fields:
-        videos.sort(
-            key=lambda v: _sort_value(v, sort),
-            reverse=(order == "desc"),
-        )
+    videos = build_video_list(storage, q, sort, order)
     return templates.TemplateResponse(
         request,
         "list.html",
@@ -65,72 +38,12 @@ async def video_list(
 @router.get("/video/{bv_id}", response_class=HTMLResponse)
 async def video_detail(request: Request, bv_id: str):
     metadata = _load_metadata_or_404(bv_id)
-
-    parts = metadata.get("parts", [])
-    total_parts = len(parts) or 1
-    display_parts = parts or [{"part": 1, "title": metadata.get("video", {}).get("title", "")}]
-
-    contents = []
-    for part_meta in display_parts:
-        part = part_meta.get("part", len(contents) + 1)
-        part_data = {
-            "part": part,
-            "title": part_meta.get("title") or f"分P {part}",
-            "duration_seconds": part_meta.get("duration_seconds")
-            or part_meta.get("duration"),
-            "language": part_meta.get("language"),
-            "has_audio": part_meta.get("has_audio", False),
-            "has_transcript": part_meta.get("has_transcript", False),
-            "has_translation": part_meta.get("has_translation", False),
-            "has_summary": part_meta.get("has_summary", False),
-        }
-        try:
-            part_data["transcript"] = storage.load_transcript(bv_id, part, total_parts)
-        except Exception:
-            part_data["transcript"] = None
-        try:
-            part_data["translation"] = storage.load_translation(
-                bv_id, part, total_parts
-            )
-        except Exception:
-            part_data["translation"] = None
-        summary = storage.load_summary(bv_id, part, total_parts)
-        if isinstance(summary, dict):
-            part_data["transcript_clean"] = summary.get("transcript_clean")
-            part_data["summary"] = summary.get("summary")
-        else:
-            part_data["transcript_clean"] = None
-            part_data["summary"] = summary if summary else None
-        contents.append(part_data)
-
-    progress = pipeline.get_progress(bv_id)
-    is_processing = bool(progress and progress.status in ("queued", "processing"))
-    progress_data = (
-        progress.model_dump()
-        if progress
-        else {
-            "status": metadata.get("status", "done"),
-            "current_step": metadata.get("current_step", "done"),
-            "step_progress": metadata.get("step_progress", 1.0),
-            "total_parts": total_parts,
-            "current_part": metadata.get("current_part", 1),
-        }
-    )
+    context = build_detail_context(storage, pipeline, bv_id, metadata)
 
     return templates.TemplateResponse(
         request,
         "detail.html",
-        {
-            "request": request,
-            "bv_id": bv_id,
-            "metadata": metadata,
-            "video": metadata.get("video", {}),
-            "parts": parts,
-            "contents": contents,
-            "total_parts": total_parts,
-            "is_processing": is_processing,
-            "progress": progress_data,
-        },
+        {"request": request, **context},
     )
 
 
