@@ -155,6 +155,19 @@ class ResultStorage:
         )
         logger.info(f"已更新metadata: {path}")
 
+    def _dir_size(self, path: Path) -> int:
+        return sum(f.stat().st_size for f in path.rglob("*") if f.is_file())
+
+    @staticmethod
+    def _format_size(size: int) -> str:
+        units = ["B", "KB", "MB", "GB"]
+        value = float(size)
+        for unit in units:
+            if value < 1024 or unit == units[-1]:
+                return f"{value:.1f} {unit}" if unit != "B" else f"{int(value)} B"
+            value /= 1024
+        return f"{size} B"
+
     def list_videos(self) -> list[dict]:
         videos = []
         if not self.result_dir.exists():
@@ -172,6 +185,10 @@ class ResultStorage:
             video_info = metadata.get("video", {})
             parts = metadata.get("parts", [])
             first_part = parts[0] if parts else {}
+            size_bytes = self._dir_size(d)
+            duration = video_info.get("duration") or sum(
+                p.get("duration_seconds") or p.get("duration") or 0 for p in parts
+            )
             videos.append(
                 {
                     "bv_id": metadata.get("bv_id", d.name),
@@ -179,8 +196,12 @@ class ResultStorage:
                     "source": metadata.get("source", "bilibili"),
                     "title": video_info.get("title", d.name),
                     "uploader": video_info.get("uploader", ""),
-                    "duration": video_info.get("duration", 0),
+                    "duration": duration,
                     "language": first_part.get("language", ""),
+                    "status": metadata.get("status", "done"),
+                    "error": metadata.get("error"),
+                    "size_bytes": size_bytes,
+                    "size_label": self._format_size(size_bytes),
                     "updated_at": metadata.get("updated_at", ""),
                     "has_transcript": any(p.get("has_transcript") for p in parts),
                     "has_translation": any(p.get("has_translation") for p in parts),

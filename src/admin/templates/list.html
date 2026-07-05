@@ -17,7 +17,7 @@
     <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
 {% macro sort_link(label, field) -%}
 {% set next_order = 'asc' if sort == field and order == 'desc' else 'desc' %}
-<a href="/admin/?q={{ q }}&sort={{ field }}&order={{ next_order }}"
+<a href="/admin/?q={{ q|urlencode }}&sort={{ field|urlencode }}&order={{ next_order|urlencode }}"
    class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase hover:text-gray-700 dark:hover:text-gray-300">
     {{ label }}{% if sort == field %}{{ ' ▼' if order == 'desc' else ' ▲' }}{% endif %}
 </a>
@@ -27,9 +27,10 @@
                 <th class="px-6 py-3 text-left">{{ sort_link('标题', 'title') }}</th>
                 <th class="px-6 py-3 text-left">{{ sort_link('来源', 'source') }}</th>
                 <th class="px-6 py-3 text-left">{{ sort_link('UP主', 'uploader') }}</th>
-                <th class="px-6 py-3 text-left">{{ sort_link('语言', 'language') }}</th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">状态</th>
-                <th class="px-6 py-3 text-left">{{ sort_link('更新时间', 'updated_at') }}</th>
+	                <th class="px-6 py-3 text-left">{{ sort_link('语言', 'language') }}</th>
+	                <th class="px-6 py-3 text-left">{{ sort_link('状态', 'status') }}</th>
+	                <th class="px-6 py-3 text-left">{{ sort_link('大小', 'size_bytes') }}</th>
+	                <th class="px-6 py-3 text-left">{{ sort_link('更新时间', 'updated_at') }}</th>
             </tr>
         </thead>
         <tbody class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
@@ -43,14 +44,17 @@
                 <td class="px-6 py-4 text-sm">
                     <a href="{{ video.url }}" target="_blank" class="text-indigo-600 dark:text-indigo-400 hover:underline">{{ video.source }}</a>
                 </td>
-                <td class="px-6 py-4 text-sm text-gray-500 dark:text-gray-400">{{ video.uploader }}</td>
-                <td class="px-6 py-4 text-sm text-gray-500 dark:text-gray-400">{{ video.language }}</td>
-                <td class="px-6 py-4 text-sm">
-                    {% if video.has_transcript %}<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-300 mr-1">转写</span>{% endif %}
-                    {% if video.has_translation %}<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-300 mr-1">翻译</span>{% endif %}
-                    {% if video.has_summary %}<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 dark:bg-purple-900 text-purple-800 dark:text-purple-300">摘要</span>{% endif %}
-                </td>
-                <td class="px-6 py-4 text-sm text-gray-500 dark:text-gray-400">{{ video.updated_at[:16] }}</td>
+	                <td class="px-6 py-4 text-sm text-gray-500 dark:text-gray-400">{{ video.uploader }}</td>
+	                <td class="px-6 py-4 text-sm text-gray-500 dark:text-gray-400">{{ video.language }}</td>
+	                <td class="px-6 py-4 text-sm">
+	                    {% if video.status in ('queued', 'processing') %}<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-300 mr-1">处理中</span>{% endif %}
+	                    {% if video.status == 'error' %}<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-300 mr-1" title="{{ video.error or '' }}">失败</span>{% endif %}
+	                    {% if video.has_transcript %}<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-300 mr-1">转写</span>{% endif %}
+	                    {% if video.has_translation %}<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-300 mr-1">翻译</span>{% endif %}
+	                    {% if video.has_summary %}<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 dark:bg-purple-900 text-purple-800 dark:text-purple-300">摘要</span>{% endif %}
+	                </td>
+	                <td class="px-6 py-4 text-sm text-gray-500 dark:text-gray-400">{{ video.size_label }}</td>
+	                <td class="px-6 py-4 text-sm text-gray-500 dark:text-gray-400">{{ video.updated_at[:16] }}</td>
             </tr>
             {% endfor %}
         </tbody>

@@ -5,21 +5,29 @@
     <a href="/admin/" class="text-indigo-600 dark:text-indigo-400 hover:text-indigo-900 dark:hover:text-indigo-300">&larr; 返回列表</a>
 </div>
 
-<div class="bg-white dark:bg-gray-800 shadow rounded-lg p-6 mb-6">
-    <h1 class="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-4">{{ video.title }}</h1>
-    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-        <div><span class="text-gray-500 dark:text-gray-400">来源:</span> <a href="{{ metadata.url or ('https://www.bilibili.com/video/' + bv_id) }}" target="_blank" class="text-indigo-600 dark:text-indigo-400 hover:underline">{{ metadata.source or 'bilibili' }}</a></div>
-        <div><span class="text-gray-500 dark:text-gray-400">UP主:</span> <span class="text-gray-900 dark:text-gray-100">{{ video.uploader }}</span></div>
-        <div><span class="text-gray-500 dark:text-gray-400">时长:</span> <span class="text-gray-900 dark:text-gray-100">{{ video.duration }}秒</span></div>
-        <div><span class="text-gray-500 dark:text-gray-400">分P:</span> <span class="text-gray-900 dark:text-gray-100">{{ total_parts }}</span></div>
-    </div>
-</div>
+	<div class="bg-white dark:bg-gray-800 shadow rounded-lg p-6 mb-6">
+	    <h1 class="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-4">{{ video.title }}</h1>
+	    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+	        <div><span class="text-gray-500 dark:text-gray-400">来源:</span> <a href="{{ metadata.url or ('https://www.bilibili.com/video/' + bv_id) }}" target="_blank" class="text-indigo-600 dark:text-indigo-400 hover:underline">{{ metadata.source or 'bilibili' }}</a></div>
+	        <div><span class="text-gray-500 dark:text-gray-400">UP主:</span> <span class="text-gray-900 dark:text-gray-100">{{ video.uploader }}</span></div>
+	        <div><span class="text-gray-500 dark:text-gray-400">时长:</span> <span class="text-gray-900 dark:text-gray-100">{{ video.duration }}秒</span></div>
+	        <div><span class="text-gray-500 dark:text-gray-400">分P:</span> <span class="text-gray-900 dark:text-gray-100">{{ total_parts }}</span></div>
+	        <div><span class="text-gray-500 dark:text-gray-400">状态:</span> <span class="text-gray-900 dark:text-gray-100">{{ metadata.status or 'done' }}</span></div>
+	    </div>
+	</div>
 
-<div x-data="progressPoller('{{ bv_id }}', {{ 'true' if is_processing else 'false' }})" x-init="start()" x-show="status === 'processing'"
-     class="bg-white dark:bg-gray-800 shadow rounded-lg p-4 mb-6">
+	{% if metadata.error %}
+	<div class="bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-lg p-4 mb-6 text-sm text-red-800 dark:text-red-300">
+	    <div class="font-medium mb-1">处理失败</div>
+	    <div>{{ metadata.current_step or 'unknown' }}: {{ metadata.error }}</div>
+	</div>
+	{% endif %}
+	
+	<div x-data="progressPoller('{{ bv_id }}', {{ 'true' if is_processing else 'false' }})" x-init="start()" x-show="status === 'queued' || status === 'processing'"
+	     class="bg-white dark:bg-gray-800 shadow rounded-lg p-4 mb-6">
     <div class="flex items-center justify-between mb-2 text-sm">
         <span class="text-gray-700 dark:text-gray-300 font-medium">
-            处理中 - <span x-text="stepLabels[current_step] || current_step"></span>
+	            <span x-text="status === 'queued' ? '排队中' : '处理中'"></span> - <span x-text="stepLabels[current_step] || current_step"></span>
             <span x-show="total_parts > 1" x-text="'(分P ' + current_part + '/' + total_parts + ')'"></span>
         </span>
         <span class="text-gray-500 dark:text-gray-400" x-text="Math.round(step_progress * 100) + '%'"></span>
@@ -30,13 +38,13 @@
     <script>
     function progressPoller(bvId, isProcessing) {
         return {
-            status: isProcessing ? 'processing' : 'done',
-            current_step: 'downloading',
+	            status: isProcessing ? 'queued' : 'done',
+	            current_step: 'queued',
             step_progress: 0,
             total_parts: 1,
             current_part: 1,
             timer: null,
-            stepLabels: { downloading: '下载中', stt: '语音识别', translating: '翻译中', summarizing: '生成摘要', done: '完成' },
+	            stepLabels: { queued: '等待开始', downloading: '下载中', stt: '语音识别', translating: '翻译中', summarizing: '生成摘要', done: '完成' },
             start() {
                 if (!isProcessing) return;
                 this.poll();
@@ -52,9 +60,9 @@
                         this.step_progress = data.step_progress;
                         this.total_parts = data.total_parts;
                         this.current_part = data.current_part;
-                        if (data.status !== 'processing') {
-                            clearInterval(this.timer);
-                        }
+	                        if (data.status !== 'queued' && data.status !== 'processing') {
+	                            clearInterval(this.timer);
+	                        }
                     }
                 } catch(e) {}
             }
@@ -64,9 +72,24 @@
 </div>
 
 {% for content in contents %}
-{% if total_parts > 1 %}
-<h2 class="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-3">分P {{ content.part }}</h2>
-{% endif %}
+	<div class="flex items-start justify-between gap-4 mb-3">
+	    <div>
+	        <h2 class="text-lg font-semibold text-gray-900 dark:text-gray-100">P{{ content.part }} {{ content.title }}</h2>
+	        <div class="mt-1 flex flex-wrap gap-2 text-xs text-gray-500 dark:text-gray-400">
+	            {% if content.duration_seconds %}<span>{{ content.duration_seconds }}秒</span>{% endif %}
+	            {% if content.language %}<span>{{ content.language }}</span>{% endif %}
+	            {% if content.has_audio %}<span>音频</span>{% endif %}
+	            {% if content.has_transcript %}<span>转写</span>{% endif %}
+	            {% if content.has_translation %}<span>翻译</span>{% endif %}
+	            {% if content.has_summary %}<span>摘要</span>{% endif %}
+	        </div>
+	    </div>
+	    <div class="flex flex-wrap gap-2 text-sm">
+	        <form method="post" action="/admin/video/{{ bv_id }}/reprocess/stt?part={{ content.part }}" onsubmit="return confirm('只重跑当前分P的STT及下游步骤？')">
+	            <button type="submit" class="text-yellow-700 dark:text-yellow-400 hover:underline">重跑本P</button>
+	        </form>
+	    </div>
+	</div>
 
 {% if (metadata.source or 'bilibili') == 'bilibili' %}
 <div class="mb-6">
@@ -84,10 +107,13 @@
         <source src="/results/{{ bv_id }}/{% if total_parts > 1 %}P{{ content.part }}_{% endif %}audio.wav" type="audio/wav">
         您的浏览器不支持音频播放
     </audio>
-    <div class="flex gap-3 mt-2 text-sm">
-        <a href="/api/v1/export/{{ bv_id }}/srt?part={{ content.part }}" class="text-indigo-600 dark:text-indigo-400 hover:underline">下载 SRT</a>
-        <a href="/api/v1/export/{{ bv_id }}/vtt?part={{ content.part }}" class="text-indigo-600 dark:text-indigo-400 hover:underline">下载 VTT</a>
-    </div>
+	    <div class="flex flex-wrap gap-3 mt-2 text-sm">
+	        <a href="/api/v1/export/{{ bv_id }}/srt?part={{ content.part }}" class="text-indigo-600 dark:text-indigo-400 hover:underline">下载 SRT</a>
+	        <a href="/api/v1/export/{{ bv_id }}/vtt?part={{ content.part }}" class="text-indigo-600 dark:text-indigo-400 hover:underline">下载 VTT</a>
+	        <a href="/api/v1/export/{{ bv_id }}/txt?part={{ content.part }}" class="text-indigo-600 dark:text-indigo-400 hover:underline">下载 TXT</a>
+	        <a href="/api/v1/export/{{ bv_id }}/md?part={{ content.part }}" class="text-indigo-600 dark:text-indigo-400 hover:underline">下载 MD</a>
+	        <a href="/api/v1/export/{{ bv_id }}/json?part={{ content.part }}" class="text-indigo-600 dark:text-indigo-400 hover:underline">下载 JSON</a>
+	    </div>
 </div>
 
 <div class="mb-6" x-data="{ tab: 'transcript' }">
@@ -106,9 +132,12 @@
         </nav>
     </div>
 
-    <div x-show="tab === 'transcript'" class="bg-gray-50 dark:bg-gray-700 rounded-lg p-4 max-h-96 overflow-y-auto">
-        <pre class="whitespace-pre-wrap text-sm text-gray-700 dark:text-gray-300">{{ content.transcript or '无文字稿' }}</pre>
-    </div>
+	    <div x-show="tab === 'transcript'" class="bg-gray-50 dark:bg-gray-700 rounded-lg p-4 max-h-96 overflow-y-auto">
+	        <div class="flex justify-end mb-2">
+	            <button type="button" onclick="copyText('transcript-{{ content.part }}')" class="text-xs text-indigo-600 dark:text-indigo-400 hover:underline">复制</button>
+	        </div>
+	        <pre id="transcript-{{ content.part }}" class="whitespace-pre-wrap text-sm text-gray-700 dark:text-gray-300">{{ content.transcript or '无文字稿' }}</pre>
+	    </div>
     {% if content.translation %}
     <div x-show="tab === 'translation'" class="bg-gray-50 dark:bg-gray-700 rounded-lg p-4 max-h-96 overflow-y-auto" style="display:none">
         <pre class="whitespace-pre-wrap text-sm text-gray-700 dark:text-gray-300">{{ content.translation }}</pre>
@@ -150,8 +179,15 @@
             </form>
         </div>
     </div>
-    <form method="post" action="/admin/video/{{ bv_id }}/delete" onsubmit="return confirm('确认删除该视频的所有处理结果？此操作不可撤销。')">
-        <button type="submit" class="bg-red-600 text-white px-4 py-2 rounded-md hover:bg-red-700">删除</button>
-    </form>
-</div>
-{% endblock %}
+	    <form method="post" action="/admin/video/{{ bv_id }}/delete" onsubmit="return confirm('确认删除该视频的所有处理结果？此操作不可撤销。')">
+	        <button type="submit" class="bg-red-600 text-white px-4 py-2 rounded-md hover:bg-red-700">删除</button>
+	    </form>
+	</div>
+	<script>
+	function copyText(id) {
+	    const el = document.getElementById(id);
+	    if (!el || !navigator.clipboard) return;
+	    navigator.clipboard.writeText(el.innerText);
+	}
+	</script>
+	{% endblock %}

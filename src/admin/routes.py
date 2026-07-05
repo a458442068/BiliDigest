@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from fastapi import APIRouter, Request, BackgroundTasks, HTTPException
+from fastapi import APIRouter, Request, BackgroundTasks, HTTPException, Query
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
@@ -23,6 +23,11 @@ def _load_metadata_or_404(bv_id: str) -> dict:
     return metadata
 
 
+def _sort_value(video: dict, field: str):
+    value = video.get(field)
+    return (value is None, value)
+
+
 @router.get("/", response_class=HTMLResponse)
 async def video_list(
     request: Request, q: str = "", sort: str = "updated_at", order: str = "desc"
@@ -35,12 +40,23 @@ async def video_list(
             for v in videos
             if q_lower in v["title"].lower() or q_lower in v["uploader"].lower()
         ]
-    if sort in ("updated_at", "title", "uploader", "duration", "language"):
+    sortable_fields = (
+        "updated_at",
+        "title",
+        "source",
+        "uploader",
+        "duration",
+        "language",
+        "status",
+        "size_bytes",
+    )
+    if sort in sortable_fields:
         videos.sort(
-            key=lambda v: v.get(sort, ""),
+            key=lambda v: _sort_value(v, sort),
             reverse=(order == "desc"),
         )
     return templates.TemplateResponse(
+        request,
         "list.html",
         {"request": request, "videos": videos, "q": q, "sort": sort, "order": order},
     )
@@ -51,11 +67,23 @@ async def video_detail(request: Request, bv_id: str):
     metadata = _load_metadata_or_404(bv_id)
 
     parts = metadata.get("parts", [])
-    total_parts = len(parts)
+    total_parts = len(parts) or 1
+    display_parts = parts or [{"part": 1, "title": metadata.get("video", {}).get("title", "")}]
 
     contents = []
-    for part in range(1, total_parts + 1):
-        part_data = {"part": part}
+    for part_meta in display_parts:
+        part = part_meta.get("part", len(contents) + 1)
+        part_data = {
+            "part": part,
+            "title": part_meta.get("title") or f"分P {part}",
+            "duration_seconds": part_meta.get("duration_seconds")
+            or part_meta.get("duration"),
+            "language": part_meta.get("language"),
+            "has_audio": part_meta.get("has_audio", False),
+            "has_transcript": part_meta.get("has_transcript", False),
+            "has_translation": part_meta.get("has_translation", False),
+            "has_summary": part_meta.get("has_summary", False),
+        }
         try:
             part_data["transcript"] = storage.load_transcript(bv_id, part, total_parts)
         except Exception:
@@ -79,6 +107,7 @@ async def video_detail(request: Request, bv_id: str):
     is_processing = bool(progress and progress.status in ("queued", "processing"))
 
     return templates.TemplateResponse(
+        request,
         "detail.html",
         {
             "request": request,
@@ -140,7 +169,10 @@ def _delete_step_files(bv_id: str, step: str, part: int, total_parts: int):
 
 @router.post("/video/{bv_id}/reprocess/{from_step}")
 async def video_reprocess_from(
-    bv_id: str, from_step: str, background_tasks: BackgroundTasks
+    bv_id: str,
+    from_step: str,
+    background_tasks: BackgroundTasks,
+    part: int | None = Query(default=None),
 ):
     if from_step not in _STEPS_SEQUENCE:
         raise HTTPException(status_code=400, detail=f"无效的步骤: {from_step}")
@@ -149,14 +181,17 @@ async def video_reprocess_from(
 
     parts = metadata.get("parts", [])
     total_parts = len(parts) or 1
+    target_parts = [part] if part else list(range(1, total_parts + 1))
+    if part is not None and (part < 1 or part > total_parts):
+        raise HTTPException(status_code=400, detail=f"分P不存在: {part}")
 
     # 删除 from_step 及其下游步骤的文件
     start_idx = _STEPS_SEQUENCE.index(from_step)
     for step in _STEPS_SEQUENCE[start_idx:]:
         if step == "download":
             continue  # 不删除音频，让 pipeline 跳过下载
-        for part in range(1, total_parts + 1):
-            _delete_step_files(bv_id, step, part, total_parts)
+        for part_num in target_parts:
+            _delete_step_files(bv_id, step, part_num, total_parts)
 
     url = metadata.get("url", f"https://www.bilibili.com/video/{bv_id}")
     pipeline.mark_queued(bv_id, total_parts)
