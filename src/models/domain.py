@@ -79,3 +79,11 @@ class ProcessingRequest:
             object.__setattr__(self, "from_step", ProcessingStep(self.from_step))
         if self.target_parts is not None:
             object.__setattr__(self, "target_parts", set(self.target_parts))
+
+
+@dataclass(frozen=True)
+class StepResult:
+    step: ProcessingStep
+    part: int
+    cached: bool
+    data: dict

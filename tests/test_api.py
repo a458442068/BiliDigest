@@ -64,13 +64,18 @@ class TestProcessEndpoint:
             "/api/v1/process",
             json={
                 "url": "BV1xx411c7mD",
-                "options": {"translate": True, "summarize": True},
+                "options": {
+                    "translate": True,
+                    "summarize": True,
+                    "from_step": "summary",
+                },
             },
         )
         assert response.status_code == 200
         assert response.json()["transcript"] == "hello world"
         assert captured["request"].translate is True
         assert captured["request"].summarize is True
+        assert captured["request"].from_step == "summary"
 
 
 class TestStatusEndpoint:

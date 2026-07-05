@@ -1,7 +1,6 @@
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
-from pathlib import Path
 
 from loguru import logger
 
@@ -9,16 +8,21 @@ from src.config import settings
 from src.exceptions import (
     DownloadError,
     STTError,
-    TranslationError,
-    SummarizationError,
     ProcessError,
 )
 from src.services.downloader import BilibiliDownloader
 from src.services.stt import SpeechToText
 from src.services.translator import Translator
 from src.services.summarizer import Summarizer
-from src.models.domain import ProcessingRequest, VideoRef
+from src.models.domain import ProcessingRequest, ProcessingStep, VideoRef
 from src.models.schemas import ProgressInfo
+from src.services.processing_steps import (
+    DownloadStep,
+    StepContext,
+    SummarizeStep,
+    TranscribeStep,
+    TranslateStep,
+)
 from src.utils.bv import get_parts, get_source_name
 from src.utils.storage import ResultStorage
 
@@ -43,6 +47,12 @@ class ProcessingPipeline:
         self.translator = Translator()
         self.summarizer = Summarizer()
         self.storage = ResultStorage()
+        self.steps = {
+            ProcessingStep.DOWNLOAD: DownloadStep(),
+            ProcessingStep.STT: TranscribeStep(),
+            ProcessingStep.TRANSLATION: TranslateStep(),
+            ProcessingStep.SUMMARY: SummarizeStep(),
+        }
         self._progress: dict[str, ProgressInfo] = {}
 
     def get_progress(self, bv_id: str) -> ProgressInfo | None:
@@ -187,6 +197,7 @@ class ProcessingPipeline:
                 request.translate,
                 request.summarize,
                 request.force,
+                request.from_step,
                 video_info,
             )
         except Exception as e:
@@ -225,6 +236,7 @@ class ProcessingPipeline:
         translate: bool,
         summarize: bool,
         force: bool,
+        from_step: ProcessingStep | None,
         video_info: dict,
     ) -> dict:
         # Load existing metadata
@@ -244,6 +256,7 @@ class ProcessingPipeline:
         await _to_thread(self._update_metadata, bv_id, video_url, [], parts, video_info)
 
         results = []
+        steps = self._steps_for_request(translate, summarize, from_step)
 
         for part_info in selected_parts:
             part = part_info.part
@@ -253,9 +266,8 @@ class ProcessingPipeline:
                 bv_id,
                 part,
                 total_parts,
-                translate,
-                summarize,
                 force,
+                steps,
                 cached_steps,
                 video_info,
                 parts,
@@ -283,12 +295,43 @@ class ProcessingPipeline:
                 {
                     "part": r.get("part"),
                     "language": r.get("language"),
-                    "transcript": r.get("transcript")[:100] + "...",
+                    "transcript": (r.get("transcript") or "")[:100] + "...",
                 }
                 for r in results
             ]
 
         return main_result
+
+    def _steps_for_request(
+        self,
+        translate: bool,
+        summarize: bool,
+        from_step: ProcessingStep | None,
+    ) -> list[ProcessingStep]:
+        steps = [ProcessingStep.DOWNLOAD, ProcessingStep.STT]
+        if translate:
+            steps.append(ProcessingStep.TRANSLATION)
+        if summarize:
+            steps.append(ProcessingStep.SUMMARY)
+        if from_step is None:
+            return steps
+        ordered_steps = [
+            ProcessingStep.DOWNLOAD,
+            ProcessingStep.STT,
+            ProcessingStep.TRANSLATION,
+            ProcessingStep.SUMMARY,
+        ]
+        start_index = ordered_steps.index(from_step)
+        selected_steps = [
+            step for step in steps if ordered_steps.index(step) >= start_index
+        ]
+        if not selected_steps:
+            raise ProcessError(
+                "process",
+                "INVALID_STEP",
+                f"当前处理选项不会执行步骤: {from_step.value}",
+            )
+        return selected_steps
 
     async def _process_part(
         self,
@@ -296,145 +339,49 @@ class ProcessingPipeline:
         bv_id: str,
         part: int,
         total_parts: int,
-        translate: bool,
-        summarize: bool,
         force: bool,
+        steps: list[ProcessingStep],
         cached_steps: list,
         video_info: dict,
         parts: list,
     ) -> dict:
         result = {"part": part}
-        prefix = f"P{part}_" if total_parts > 1 else ""
-        audio_path = None
+        context = StepContext(
+            url=url,
+            bv_id=bv_id,
+            part=part,
+            total_parts=total_parts,
+            force=force or steps[0] != ProcessingStep.DOWNLOAD,
+            storage=self.storage,
+            downloader=self.downloader,
+            stt=self.stt,
+            translator=self.translator,
+            summarizer=self.summarizer,
+            run_io=_to_thread,
+            run_stt=_to_stt,
+        )
+        if ProcessingStep.DOWNLOAD not in steps and self.storage.has_audio(
+            bv_id, part, total_parts
+        ):
+            result["audio_path"] = self.storage.get_audio_path(bv_id, part, total_parts)
 
         try:
-            # Step 1: Download (I/O, 不阻塞事件循环)
-            step_name = f"{prefix}download"
-            self._set_progress(bv_id, current_step="downloading", step_progress=0.0)
-            if not force and self.storage.has_audio(bv_id, part, total_parts):
-                audio_path = self.storage.get_audio_path(bv_id, part, total_parts)
-                cached_steps.append(step_name)
-                logger.info(f"缓存命中: {step_name}")
-            else:
-                logger.info(f"阶段: 下载 - {url} (分P: {part})")
-                audio_path = await _to_thread(self.downloader.download, url, part)
-                audio_path = await _to_thread(
-                    self.storage.save_audio, bv_id, part, total_parts, audio_path
-                )
-            self._set_progress(bv_id, current_step="downloading", step_progress=1.0)
-            await _to_thread(
-                self._update_metadata, bv_id, url, [result], parts, video_info
-            )
-
-            # Step 2: STT (GPU, 专用线程池串行)
-            step_name = f"{prefix}stt"
-            self._set_progress(bv_id, current_step="stt", step_progress=0.0)
-            if not force and self.storage.has_transcript(bv_id, part, total_parts):
-                transcript = await _to_thread(
-                    self.storage.load_transcript, bv_id, part, total_parts
-                )
-                cached_steps.append(step_name)
-                logger.info(f"缓存命中: {step_name}")
-                # Load language and duration from metadata
-                metadata = await _to_thread(self.storage.load_metadata, bv_id)
-                parts_meta = metadata.get("parts", [])
-                part_meta = next((p for p in parts_meta if p["part"] == part), {})
-                result["language"] = part_meta.get("language", "en")
-                result["duration_seconds"] = part_meta.get("duration_seconds")
-            else:
-                logger.info(f"阶段: 语音识别 (分P: {part})")
-                stt_result = await _to_stt(self.stt.transcribe, audio_path)
-                transcript = stt_result["transcript"]
-                result["language"] = stt_result.get("language", "en")
-                result["duration_seconds"] = stt_result.get("duration_seconds")
-                await _to_thread(
-                    self.storage.save_transcript,
+            for step in steps:
+                runner = self.steps[step]
+                self._set_progress(
                     bv_id,
-                    part,
-                    total_parts,
-                    transcript,
+                    current_step=runner.progress_step,
+                    step_progress=0.0,
                 )
-                # Save segments if timestamps are available
-                segments = stt_result.get("segments")
-                if segments:
-                    await _to_thread(
-                        self.storage.save_segments,
-                        bv_id,
-                        part,
-                        total_parts,
-                        segments,
-                    )
-            self._set_progress(bv_id, current_step="stt", step_progress=1.0)
-            await _to_thread(
-                self._update_metadata, bv_id, url, [result], parts, video_info
-            )
-
-            result["transcript"] = transcript
-
-            # Step 3: Translation (网络 I/O, 异步不占线程)
-            if translate:
-                step_name = f"{prefix}translation"
-                self._set_progress(bv_id, current_step="translating", step_progress=0.0)
-                language = result.get("language", "en")
-                if not force and self.storage.has_translation(bv_id, part, total_parts):
-                    translation = await _to_thread(
-                        self.storage.load_translation, bv_id, part, total_parts
-                    )
-                    cached_steps.append(step_name)
-                    logger.info(f"缓存命中: {step_name}")
-                else:
-                    logger.info(f"阶段: 翻译 (分P: {part})")
-                    try:
-                        translation = await self.translator.translate(
-                            transcript, language
-                        )
-                        if translation:
-                            await _to_thread(
-                                self.storage.save_translation,
-                                bv_id,
-                                part,
-                                total_parts,
-                                translation,
-                            )
-                    except TranslationError as e:
-                        raise ProcessError("translation", e.code, e.message)
-                result["translation"] = translation
-                self._set_progress(bv_id, current_step="translating", step_progress=1.0)
-                await _to_thread(
-                    self._update_metadata, bv_id, url, [result], parts, video_info
+                step_result = await runner.run(context, result)
+                result.update(step_result.data)
+                if step_result.cached:
+                    cached_steps.append(f"{context.prefix}{step.value}")
+                self._set_progress(
+                    bv_id,
+                    current_step=runner.progress_step,
+                    step_progress=1.0,
                 )
-
-            # Step 4: Summarization (网络 I/O, 异步不占线程)
-            if summarize:
-                step_name = f"{prefix}summary"
-                self._set_progress(bv_id, current_step="summarizing", step_progress=0.0)
-                if not force and self.storage.has_summary(bv_id, part, total_parts):
-                    summary_data = await _to_thread(
-                        self.storage.load_summary, bv_id, part, total_parts
-                    )
-                    cached_steps.append(step_name)
-                    logger.info(f"缓存命中: {step_name}")
-                else:
-                    logger.info(f"阶段: 摘要 (分P: {part})")
-                    try:
-                        summary_input = result.get("translation") or transcript
-                        summary_data = await self.summarizer.summarize(summary_input)
-                        if summary_data:
-                            await _to_thread(
-                                self.storage.save_summary,
-                                bv_id,
-                                part,
-                                total_parts,
-                                summary_data,
-                            )
-                    except SummarizationError as e:
-                        raise ProcessError("summarization", e.code, e.message)
-                if summary_data and isinstance(summary_data, dict):
-                    result["transcript_clean"] = summary_data.get("transcript_clean")
-                    result["summary"] = summary_data.get("summary")
-                else:
-                    result["summary"] = summary_data
-                self._set_progress(bv_id, current_step="summarizing", step_progress=1.0)
                 await _to_thread(
                     self._update_metadata, bv_id, url, [result], parts, video_info
                 )
