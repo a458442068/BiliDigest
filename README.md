@@ -86,6 +86,8 @@ curl http://localhost:8000/api/v1/export/BV1xx411c7mD/srt -o subtitle.srt
 
 访问 `http://localhost:8000/admin/` 查看已处理视频列表、详情、搜索、删除和重新处理。
 
+> 本项目按本机/可信内网工具设计，默认不提供 admin 鉴权。请不要在公网裸露 `/admin/` 或 `/results/`。
+
 ## 支持的站点
 
 B站、YouTube、Twitter/X、TikTok、Reddit、SoundCloud、Vimeo、Twitch、Instagram、网易云音乐、喜马拉雅、小宇宙等。详见 `src/utils/bv.py` 中的 `SUPPORTED_DOMAINS`。
@@ -94,4 +96,10 @@ B站、YouTube、Twitter/X、TikTok、Reddit、SoundCloud、Vimeo、Twitch、Ins
 
 ```bash
 uv run --with pytest pytest tests/
+```
+
+默认测试使用 mock/fake 服务，不会访问真实下载、STT 模型或 LLM API。需要验证真实外部链路时，使用 `integration` 标记单独运行：
+
+```bash
+uv run --with pytest pytest -m integration
 ```

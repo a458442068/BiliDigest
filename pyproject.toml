@@ -21,3 +21,9 @@ stt = [
     "transformers>=4.38.0",
     "torch>=2.2.0",
 ]
+
+[tool.pytest.ini_options]
+addopts = "-m 'not integration'"
+markers = [
+    "integration: tests that call real download, STT, or LLM services",
+]

@@ -92,8 +92,6 @@ class SpeechToText:
                     )
 
     def _transcribe_local(self, audio_path: str) -> dict:
-        self._load_model()
-
         try:
             audio_path = AudioFormatHandler.ensure_wav(audio_path)
         except Exception:
@@ -102,6 +100,8 @@ class SpeechToText:
         audio_file = Path(audio_path)
         if not audio_file.exists():
             raise STTError("INFERENCE_ERROR", f"音频文件不存在: {audio_path}")
+
+        self._load_model()
 
         try:
             audio_array, sample_rate = sf.read(str(audio_file))

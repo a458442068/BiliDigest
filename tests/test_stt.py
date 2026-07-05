@@ -8,7 +8,8 @@ class TestSpeechToText:
     def setup_method(self):
         self.stt = SpeechToText()
 
-    def test_transcribe_nonexistent_file(self):
+    def test_transcribe_nonexistent_file(self, monkeypatch):
+        monkeypatch.setattr("src.services.stt.settings.stt_backend", "local")
         with pytest.raises(STTError) as exc_info:
             self.stt.transcribe("/nonexistent/audio.wav")
-        assert exc_info.value.code in ("INFERENCE_ERROR", "MODEL_LOAD_ERROR")
+        assert exc_info.value.code == "INFERENCE_ERROR"
