@@ -98,6 +98,35 @@ def test_reprocess_part_marks_queued_without_real_pipeline(monkeypatch, tmp_path
     assert captured["request"].from_step == "stt"
 
 
+def test_reprocess_part_deletes_only_selected_part_artifacts(monkeypatch, tmp_path):
+    storage = patch_storage(monkeypatch, tmp_path)
+    bv_id = "BV1xx411c7mD"
+    storage.save_metadata(
+        bv_id,
+        {
+            "bv_id": bv_id,
+            "url": f"https://www.bilibili.com/video/{bv_id}",
+            "status": "done",
+            "parts": [{"part": 1}, {"part": 2}],
+        },
+    )
+    storage.save_transcript(bv_id, 1, 2, "p1 transcript")
+    storage.save_transcript(bv_id, 2, 2, "p2 transcript")
+
+    async def fake_process(request):
+        return {}
+
+    monkeypatch.setattr(admin_routes.pipeline, "process_request", fake_process)
+
+    response = client.post(
+        f"/admin/video/{bv_id}/reprocess/stt?part=1", follow_redirects=False
+    )
+
+    assert response.status_code == 303
+    assert storage.has_transcript(bv_id, 1, 2) is False
+    assert storage.has_transcript(bv_id, 2, 2) is True
+
+
 def test_delete_video_clears_stale_progress(monkeypatch, tmp_path):
     storage = patch_storage(monkeypatch, tmp_path)
     bv_id = seed_video(storage)

@@ -1,5 +1,6 @@
 import pytest
 
+from src.models.domain import ArtifactKind
 from src.utils.storage import ResultStorage
 
 
@@ -47,3 +48,44 @@ class TestResultStorageSafety:
         videos = storage.list_videos()
 
         assert [video["bv_id"] for video in videos] == ["BV1xx411c7mD"]
+
+    def test_artifact_api_lists_and_loads_part_outputs(self, tmp_path):
+        storage = ResultStorage(str(tmp_path))
+        bv_id = "BV1xx411c7mD"
+
+        storage.save_artifact(
+            bv_id, 1, 2, ArtifactKind.TRANSCRIPT, "hello world"
+        )
+        storage.save_artifact(
+            bv_id, 1, 2, ArtifactKind.SEGMENTS, [{"start": 0, "end": 1}]
+        )
+
+        artifacts = storage.list_part_artifacts(bv_id, 1, 2)
+
+        assert artifacts["transcript"] is True
+        assert artifacts["segments"] is True
+        assert artifacts["translation"] is False
+        assert storage.load_artifact(bv_id, 1, 2, "transcript") == "hello world"
+
+    def test_delete_artifacts_respects_from_step(self, tmp_path):
+        storage = ResultStorage(str(tmp_path))
+        bv_id = "BV1xx411c7mD"
+        storage.save_transcript(bv_id, 1, 1, "hello")
+        storage.save_translation(bv_id, 1, 1, "你好")
+        storage.save_summary(
+            bv_id,
+            1,
+            1,
+            {"transcript_clean": "clean", "summary": "summary"},
+        )
+
+        deleted = storage.delete_artifacts(bv_id, 1, 1, "translation")
+
+        assert {path.name for path in deleted} == {
+            "translation.txt",
+            "summary.txt",
+            "transcript_clean.txt",
+        }
+        assert storage.has_transcript(bv_id, 1, 1) is True
+        assert storage.has_translation(bv_id, 1, 1) is False
+        assert storage.has_summary(bv_id, 1, 1) is False
