@@ -24,10 +24,10 @@ class TestProcessEndpoint:
         assert response.status_code == 422
 
     def test_process_unsupported_url(self, monkeypatch):
-        async def fake_process(**kwargs):
+        async def fake_process(request):
             raise DownloadError("INVALID_URL", "不支持的链接")
 
-        monkeypatch.setattr(api_routes.pipeline, "process", fake_process)
+        monkeypatch.setattr(api_routes.pipeline, "process_request", fake_process)
 
         response = client.post(
             "/api/v1/process", json={"url": "https://example.com/video/123"}
@@ -37,10 +37,10 @@ class TestProcessEndpoint:
         assert data["detail"]["error"]["stage"] == "download"
 
     def test_process_invalid_bv(self, monkeypatch):
-        async def fake_process(**kwargs):
+        async def fake_process(request):
             raise DownloadError("INVALID_URL", "不支持的链接")
 
-        monkeypatch.setattr(api_routes.pipeline, "process", fake_process)
+        monkeypatch.setattr(api_routes.pipeline, "process_request", fake_process)
 
         response = client.post("/api/v1/process", json={"url": "INVALID_BV"})
         assert response.status_code == 400
@@ -50,15 +50,15 @@ class TestProcessEndpoint:
     def test_process_with_options(self, monkeypatch):
         captured = {}
 
-        async def fake_process(**kwargs):
-            captured.update(kwargs)
+        async def fake_process(request):
+            captured["request"] = request
             return {
                 "url": "https://www.bilibili.com/video/BV1xx411c7mD",
                 "transcript": "hello world",
                 "language": "en",
             }
 
-        monkeypatch.setattr(api_routes.pipeline, "process", fake_process)
+        monkeypatch.setattr(api_routes.pipeline, "process_request", fake_process)
 
         response = client.post(
             "/api/v1/process",
@@ -69,8 +69,8 @@ class TestProcessEndpoint:
         )
         assert response.status_code == 200
         assert response.json()["transcript"] == "hello world"
-        assert captured["translate"] is True
-        assert captured["summarize"] is True
+        assert captured["request"].translate is True
+        assert captured["request"].summarize is True
 
 
 class TestStatusEndpoint:

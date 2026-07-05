@@ -17,8 +17,9 @@ from src.services.downloader import BilibiliDownloader
 from src.services.stt import SpeechToText
 from src.services.translator import Translator
 from src.services.summarizer import Summarizer
+from src.models.domain import ProcessingRequest, VideoRef
 from src.models.schemas import ProgressInfo
-from src.utils.bv import extract_video_id, get_parts, validate_input, get_source_name
+from src.utils.bv import get_parts, get_source_name
 from src.utils.storage import ResultStorage
 
 # STT 专用线程池：max_workers=1 保证 GPU 串行，避免显存争抢
@@ -126,31 +127,47 @@ class ProcessingPipeline:
         summarize: bool = False,
         force: bool = False,
         target_parts: set[int] | None = None,
+        from_step: str | None = None,
     ) -> dict:
-        bv_id = extract_video_id(url)
-        video_url = validate_input(url)
+        return await self.process_request(
+            ProcessingRequest(
+                url=url,
+                translate=translate,
+                summarize=summarize,
+                force=force,
+                target_parts=target_parts,
+                from_step=from_step,
+            )
+        )
+
+    async def process_request(self, request: ProcessingRequest) -> dict:
+        video_ref = VideoRef.from_input(request.url)
+        bv_id = video_ref.bv_id
+        video_url = video_ref.url
         self.mark_queued(bv_id)
 
         try:
             # Get video info
-            video_info = await _to_thread(self.downloader.get_video_info, url)
+            video_info = await _to_thread(self.downloader.get_video_info, request.url)
 
             # Get parts info
-            parts = await _to_thread(get_parts, url)
+            parts = await _to_thread(get_parts, request.url)
             total_parts = len(parts)
             part_numbers = {part.part for part in parts}
             selected_parts = parts
-            if target_parts is not None:
-                invalid_parts = sorted(target_parts - part_numbers)
+            if request.target_parts is not None:
+                invalid_parts = sorted(request.target_parts - part_numbers)
                 if invalid_parts:
                     raise ProcessError(
                         "process",
                         "INVALID_PART",
                         f"分P不存在: {', '.join(str(p) for p in invalid_parts)}",
                     )
-                if not target_parts:
+                if not request.target_parts:
                     raise ProcessError("process", "INVALID_PART", "未选择分P")
-                selected_parts = [part for part in parts if part.part in target_parts]
+                selected_parts = [
+                    part for part in parts if part.part in request.target_parts
+                ]
 
             self._set_progress(
                 bv_id,
@@ -163,13 +180,13 @@ class ProcessingPipeline:
             return await self._process_inner(
                 bv_id,
                 video_url,
-                url,
+                request.url,
                 parts,
                 selected_parts,
                 total_parts,
-                translate,
-                summarize,
-                force,
+                request.translate,
+                request.summarize,
+                request.force,
                 video_info,
             )
         except Exception as e:

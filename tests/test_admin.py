@@ -82,11 +82,11 @@ def test_reprocess_part_marks_queued_without_real_pipeline(monkeypatch, tmp_path
     bv_id = seed_video(storage)
     captured = {}
 
-    async def fake_process(**kwargs):
-        captured.update(kwargs)
+    async def fake_process(request):
+        captured["request"] = request
         return {}
 
-    monkeypatch.setattr(admin_routes.pipeline, "process", fake_process)
+    monkeypatch.setattr(admin_routes.pipeline, "process_request", fake_process)
 
     response = client.post(
         f"/admin/video/{bv_id}/reprocess/stt?part=1", follow_redirects=False
@@ -94,7 +94,8 @@ def test_reprocess_part_marks_queued_without_real_pipeline(monkeypatch, tmp_path
 
     assert response.status_code == 303
     assert storage.load_metadata(bv_id)["status"] == "queued"
-    assert captured["target_parts"] == {1}
+    assert captured["request"].target_parts == {1}
+    assert captured["request"].from_step == "stt"
 
 
 def test_delete_video_clears_stale_progress(monkeypatch, tmp_path):

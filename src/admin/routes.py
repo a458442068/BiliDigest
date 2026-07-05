@@ -6,6 +6,7 @@ from fastapi.templating import Jinja2Templates
 
 from src.api.routes import pipeline
 from src.admin.view_models import build_detail_context, build_video_list
+from src.models.domain import ProcessingRequest
 from src.utils.storage import ResultStorage
 
 router = APIRouter(prefix="/admin")
@@ -65,11 +66,13 @@ async def video_reprocess(bv_id: str, background_tasks: BackgroundTasks):
     url = metadata.get("url", f"https://www.bilibili.com/video/{bv_id}")
     pipeline.mark_queued(bv_id, len(metadata.get("parts", [])) or 1)
     background_tasks.add_task(
-        pipeline.process,
-        url=url,
-        translate=True,
-        summarize=True,
-        force=True,
+        pipeline.process_request,
+        ProcessingRequest(
+            url=url,
+            translate=True,
+            summarize=True,
+            force=True,
+        ),
     )
     return RedirectResponse(url=f"/admin/video/{bv_id}", status_code=303)
 
@@ -122,10 +125,13 @@ async def video_reprocess_from(
     url = metadata.get("url", f"https://www.bilibili.com/video/{bv_id}")
     pipeline.mark_queued(bv_id, total_parts)
     background_tasks.add_task(
-        pipeline.process,
-        url=url,
-        translate=True,
-        summarize=True,
-        target_parts={part} if part is not None else None,
+        pipeline.process_request,
+        ProcessingRequest(
+            url=url,
+            translate=True,
+            summarize=True,
+            target_parts={part} if part is not None else None,
+            from_step=from_step,
+        ),
     )
     return RedirectResponse(url=f"/admin/video/{bv_id}", status_code=303)

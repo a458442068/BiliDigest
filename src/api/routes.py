@@ -10,6 +10,7 @@ from src.models.schemas import (
     ProgressInfo,
 )
 from src.exceptions import ProcessError, DownloadError
+from src.models.domain import ProcessingRequest
 from src.services.pipeline import ProcessingPipeline
 from src.utils.export import ExportError, ExportService
 
@@ -27,11 +28,14 @@ def _raise_export_error(e: ExportError):
 )
 async def process_video(request: ProcessRequest):
     try:
-        result = await pipeline.process(
-            url=request.url,
-            translate=request.options.translate,
-            summarize=request.options.summarize,
-            force=request.options.force,
+        result = await pipeline.process_request(
+            ProcessingRequest(
+                url=request.url,
+                translate=request.options.translate,
+                summarize=request.options.summarize,
+                force=request.options.force,
+                from_step=request.options.from_step,
+            )
         )
         return ProcessResult(**result)
     except DownloadError as e:
