@@ -14,7 +14,7 @@ from src.services.downloader import BilibiliDownloader
 from src.services.stt import SpeechToText
 from src.services.translator import Translator
 from src.services.summarizer import Summarizer
-from src.models.domain import ProcessingRequest, ProcessingStep, VideoRef
+from src.models.domain import ArtifactKind, ProcessingRequest, ProcessingStep, VideoRef
 from src.models.schemas import ProgressInfo
 from src.services.processing_steps import (
     DownloadStep,
@@ -460,15 +460,12 @@ class ProcessingPipeline:
                 parts_meta.append(part_entry)
 
             total_parts = len(parts)
+            artifacts = self.storage.list_part_artifacts(bv_id, part_num, total_parts)
             update_dict = {
-                "has_audio": self.storage.has_audio(bv_id, part_num, total_parts),
-                "has_transcript": self.storage.has_transcript(
-                    bv_id, part_num, total_parts
-                ),
-                "has_translation": self.storage.has_translation(
-                    bv_id, part_num, total_parts
-                ),
-                "has_summary": self.storage.has_summary(bv_id, part_num, total_parts),
+                "has_audio": artifacts[ArtifactKind.AUDIO.value],
+                "has_transcript": artifacts[ArtifactKind.TRANSCRIPT.value],
+                "has_translation": artifacts[ArtifactKind.TRANSLATION.value],
+                "has_summary": artifacts[ArtifactKind.SUMMARY.value],
             }
             # Only update language/duration if result has them (not cached)
             if result.get("language") is not None:

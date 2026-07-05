@@ -1,3 +1,6 @@
+from src.models.domain import ArtifactKind
+
+
 SORTABLE_FIELDS = (
     "updated_at",
     "title",
@@ -71,31 +74,41 @@ def _build_part_content(
     storage, bv_id: str, part_meta: dict, total_parts: int, index: int
 ) -> dict:
     part = part_meta.get("part", index + 1)
+    artifacts = storage.list_part_artifacts(bv_id, part, total_parts)
     part_data = {
         "part": part,
         "title": part_meta.get("title") or f"分P {part}",
         "duration_seconds": part_meta.get("duration_seconds")
         or part_meta.get("duration"),
         "language": part_meta.get("language"),
-        "has_audio": part_meta.get("has_audio", False),
-        "has_transcript": part_meta.get("has_transcript", False),
-        "has_translation": part_meta.get("has_translation", False),
-        "has_summary": part_meta.get("has_summary", False),
+        "has_audio": artifacts[ArtifactKind.AUDIO.value],
+        "has_transcript": artifacts[ArtifactKind.TRANSCRIPT.value],
+        "has_translation": artifacts[ArtifactKind.TRANSLATION.value],
+        "has_summary": artifacts[ArtifactKind.SUMMARY.value],
     }
     try:
-        part_data["transcript"] = storage.load_transcript(bv_id, part, total_parts)
+        part_data["transcript"] = storage.load_artifact(
+            bv_id, part, total_parts, ArtifactKind.TRANSCRIPT
+        )
     except FileNotFoundError:
         part_data["transcript"] = None
     try:
-        part_data["translation"] = storage.load_translation(bv_id, part, total_parts)
+        part_data["translation"] = storage.load_artifact(
+            bv_id, part, total_parts, ArtifactKind.TRANSLATION
+        )
     except FileNotFoundError:
         part_data["translation"] = None
 
-    summary = storage.load_summary(bv_id, part, total_parts)
-    if isinstance(summary, dict):
-        part_data["transcript_clean"] = summary.get("transcript_clean")
-        part_data["summary"] = summary.get("summary")
-    else:
+    try:
+        part_data["transcript_clean"] = storage.load_artifact(
+            bv_id, part, total_parts, ArtifactKind.TRANSCRIPT_CLEAN
+        )
+    except FileNotFoundError:
         part_data["transcript_clean"] = None
-        part_data["summary"] = summary if summary else None
+    try:
+        part_data["summary"] = storage.load_artifact(
+            bv_id, part, total_parts, ArtifactKind.SUMMARY
+        )
+    except FileNotFoundError:
+        part_data["summary"] = None
     return part_data
