@@ -46,7 +46,7 @@ def patch_storage(monkeypatch, tmp_path):
     storage = ResultStorage(str(tmp_path))
     monkeypatch.setattr(admin_routes, "storage", storage)
     monkeypatch.setattr(admin_routes.pipeline, "storage", storage)
-    monkeypatch.setattr(api_routes, "ResultStorage", lambda: storage)
+    monkeypatch.setattr(api_routes.export_service, "storage", storage)
     admin_routes.pipeline._progress.clear()
     return storage
 
