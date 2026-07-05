@@ -55,6 +55,9 @@ class ProcessingPipeline:
             return None
         return self._progress_from_metadata(bv_id, metadata)
 
+    def clear_progress(self, bv_id: str):
+        self._progress.pop(bv_id, None)
+
     def mark_queued(self, bv_id: str, total_parts: int = 1):
         self._progress[bv_id] = ProgressInfo(
             bv_id=bv_id,
@@ -188,6 +191,11 @@ class ProcessingPipeline:
                 self._set_progress(
                     bv_id, status="done", current_step="done", step_progress=1.0
                 )
+            if bv_id in self._progress and self._progress[bv_id].status in (
+                "done",
+                "error",
+            ):
+                self.clear_progress(bv_id)
 
     async def _process_inner(
         self,

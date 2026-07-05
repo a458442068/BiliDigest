@@ -97,6 +97,19 @@ def test_reprocess_part_marks_queued_without_real_pipeline(monkeypatch, tmp_path
     assert captured["target_parts"] == {1}
 
 
+def test_delete_video_clears_stale_progress(monkeypatch, tmp_path):
+    storage = patch_storage(monkeypatch, tmp_path)
+    bv_id = seed_video(storage)
+    admin_routes.pipeline.mark_queued(bv_id)
+
+    response = client.post(f"/admin/video/{bv_id}/delete", follow_redirects=False)
+    status_response = client.get(f"/api/v1/status/{bv_id}")
+
+    assert response.status_code == 303
+    assert status_response.status_code == 404
+    assert admin_routes.pipeline.get_progress(bv_id) is None
+
+
 def test_export_txt_md_json(monkeypatch, tmp_path):
     storage = patch_storage(monkeypatch, tmp_path)
     bv_id = seed_video(storage)

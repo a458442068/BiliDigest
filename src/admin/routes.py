@@ -142,6 +142,7 @@ async def video_delete(bv_id: str):
         raise HTTPException(status_code=400, detail=str(e))
     if not deleted:
         raise HTTPException(status_code=404, detail="视频不存在")
+    pipeline.clear_progress(bv_id)
     return RedirectResponse(url="/admin/", status_code=303)
 
 

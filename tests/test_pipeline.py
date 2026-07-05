@@ -87,6 +87,8 @@ def test_process_persists_done_status(tmp_path):
     assert metadata["parts"][0]["has_transcript"] is True
     assert metadata["parts"][0]["has_translation"] is True
     assert metadata["parts"][0]["has_summary"] is True
+    assert "BV1xx411c7mD" not in pipeline._progress
+    assert pipeline.get_progress("BV1xx411c7mD").status == "done"
 
 
 def test_process_persists_error_status(tmp_path):
@@ -102,6 +104,8 @@ def test_process_persists_error_status(tmp_path):
     assert metadata["status"] == "error"
     assert metadata["current_step"] == "download"
     assert metadata["error"] == "fake failure"
+    assert "BV1xx411c7mD" not in pipeline._progress
+    assert pipeline.get_progress("BV1xx411c7mD").status == "error"
 
 
 def test_process_target_parts_only_reprocesses_selected_part(monkeypatch, tmp_path):
