@@ -38,11 +38,20 @@ class PartInfo:
     duration: float | None = None
 
 
+def _host_matches_domain(host: str, domain: str) -> bool:
+    host = host.lower().rstrip(".")
+    domain = domain.lower()
+    return host == domain or host.endswith(f".{domain}")
+
+
 def _is_supported_url(url: str) -> bool:
     """检查 URL 是否匹配白名单域名。"""
     try:
-        host = urlparse(url).hostname or ""
-        return any(host.endswith(d) for d in SUPPORTED_DOMAINS)
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https"):
+            return False
+        host = parsed.hostname or ""
+        return any(_host_matches_domain(host, d) for d in SUPPORTED_DOMAINS)
     except Exception:
         return False
 
@@ -73,8 +82,10 @@ def validate_input(url_or_id: str) -> str:
 
     # B站 URL（可能带查询参数等）→ 提取 BV 号重建
     # 先尝试宽松匹配，支持带 ?query 的 URL
+    parsed = urlparse(url_or_id)
+    host = parsed.hostname or ""
     bili_match = re.search(r"(BV[1-9A-HJ-NP-Za-km-z]{10})", url_or_id)
-    if bili_match and "bilibili.com" in url_or_id:
+    if bili_match and _host_matches_domain(host, "bilibili.com"):
         return f"https://www.bilibili.com/video/{bili_match.group(1)}"
 
     # 其他白名单 URL → 直接返回
@@ -88,7 +99,7 @@ def get_source_name(url: str) -> str:
     """从 URL 提取来源站点名称。"""
     host = urlparse(url).hostname or ""
     for domain in SUPPORTED_DOMAINS:
-        if host.endswith(domain):
+        if _host_matches_domain(host, domain):
             return domain.split(".")[-2]  # youtube, bilibili, twitter...
     return "unknown"
 

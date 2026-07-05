@@ -1,6 +1,7 @@
 import json
-import re
+import os
 import subprocess
+import tempfile
 from pathlib import Path
 
 from loguru import logger
@@ -12,9 +13,40 @@ from src.utils.bv import validate_input, extract_video_id
 
 
 class BilibiliDownloader:
+    BROWSER_USER_AGENT = (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+    )
+
     def __init__(self, output_dir: str = "/tmp/stt_server"):
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
+
+    def _browser_headers(self) -> list[str]:
+        return [
+            "--user-agent",
+            self.BROWSER_USER_AGENT,
+            "--add-header",
+            "Referer:https://www.bilibili.com",
+            "--add-header",
+            "Origin:https://www.bilibili.com",
+        ]
+
+    def _write_cookie_file(self) -> Path | None:
+        if not settings.bilibili_cookie:
+            return None
+        with tempfile.NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            dir=self.output_dir,
+            prefix="bilibili_cookie_",
+            suffix=".txt",
+            delete=False,
+        ) as cookie_file:
+            cookie_file.write(settings.bilibili_cookie)
+            cookie_path = Path(cookie_file.name)
+        os.chmod(cookie_path, 0o600)
+        return cookie_path
 
     def get_video_info(self, url_or_bv: str) -> dict:
         video_url = validate_input(url_or_bv)
@@ -23,11 +55,9 @@ class BilibiliDownloader:
             "--dump-json",
             "--no-download",
             "--no-warnings",
-            "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-            "--add-header", "Referer:https://www.bilibili.com",
-            "--add-header", "Origin:https://www.bilibili.com",
-            video_url,
         ]
+        cmd.extend(self._browser_headers())
+        cmd.append(video_url)
         try:
             result = subprocess.run(
                 cmd, capture_output=True, text=True, timeout=30, check=False
@@ -69,16 +99,11 @@ class BilibiliDownloader:
         else:
             cmd.append("--no-playlist")
 
-        if settings.bilibili_cookie:
-            cookie_file = self.output_dir / "cookie.txt"
-            cookie_file.write_text(settings.bilibili_cookie)
-            cmd.extend(["--cookies", str(cookie_file)])
+        cookie_path = self._write_cookie_file()
+        if cookie_path:
+            cmd.extend(["--cookies", str(cookie_path)])
 
-        cmd.extend([
-            "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-            "--add-header", "Referer:https://www.bilibili.com",
-            "--add-header", "Origin:https://www.bilibili.com",
-        ])
+        cmd.extend(self._browser_headers())
         cmd.append(video_url)
 
         logger.info(f"开始下载: {video_url} (分P: {part})")
@@ -139,3 +164,6 @@ class BilibiliDownloader:
             raise
         except Exception as e:
             raise DownloadError("DOWNLOAD_FAILED", f"下载异常: {str(e)}")
+        finally:
+            if cookie_path and cookie_path.exists():
+                cookie_path.unlink()

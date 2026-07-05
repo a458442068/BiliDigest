@@ -1,4 +1,5 @@
 import json
+import re
 import shutil
 from pathlib import Path
 
@@ -7,15 +8,31 @@ from loguru import logger
 from src.config import settings
 
 
+SAFE_BV_ID_PATTERN = re.compile(r"^(BV[1-9A-HJ-NP-Za-km-z]{10}|[0-9a-f]{12})$")
+
+
 class ResultStorage:
     def __init__(self, result_dir: str | None = None):
-        self.result_dir = Path(result_dir or settings.result_dir)
+        self.result_dir = Path(result_dir or settings.result_dir).resolve()
         self.result_dir.mkdir(parents=True, exist_ok=True)
 
+    @staticmethod
+    def validate_bv_id(bv_id: str) -> str:
+        if not SAFE_BV_ID_PATTERN.fullmatch(bv_id or ""):
+            raise ValueError(f"非法视频ID: {bv_id}")
+        return bv_id
+
+    def safe_video_dir(self, bv_id: str, create: bool = True) -> Path:
+        safe_id = self.validate_bv_id(bv_id)
+        video_dir = (self.result_dir / safe_id).resolve()
+        if self.result_dir != video_dir and self.result_dir not in video_dir.parents:
+            raise ValueError(f"视频目录越界: {bv_id}")
+        if create:
+            video_dir.mkdir(parents=True, exist_ok=True)
+        return video_dir
+
     def get_dir(self, bv_id: str) -> Path:
-        d = self.result_dir / bv_id
-        d.mkdir(parents=True, exist_ok=True)
-        return d
+        return self.safe_video_dir(bv_id)
 
     def _prefix(self, part: int, total_parts: int) -> str:
         if total_parts > 1:
@@ -145,7 +162,11 @@ class ResultStorage:
         for d in sorted(self.result_dir.iterdir()):
             if not d.is_dir():
                 continue
-            metadata = self.load_metadata(d.name)
+            try:
+                metadata = self.load_metadata(d.name)
+            except ValueError:
+                logger.warning(f"跳过非法结果目录: {d}")
+                continue
             if not metadata:
                 continue
             video_info = metadata.get("video", {})
@@ -170,7 +191,7 @@ class ResultStorage:
         return videos
 
     def delete_video(self, bv_id: str) -> bool:
-        d = self.result_dir / bv_id
+        d = self.safe_video_dir(bv_id, create=False)
         if d.exists() and d.is_dir():
             shutil.rmtree(d)
             logger.info(f"已删除视频目录: {d}")
