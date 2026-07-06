@@ -5,7 +5,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from src.api.routes import pipeline
-from src.admin.view_models import build_detail_context, build_video_list
+from src.admin.view_models import build_detail_context, build_video_dashboard
 from src.models.domain import ProcessingRequest
 from src.utils.storage import ResultStorage
 
@@ -26,13 +26,29 @@ def _load_metadata_or_404(bv_id: str) -> dict:
 
 @router.get("/", response_class=HTMLResponse)
 async def video_list(
-    request: Request, q: str = "", sort: str = "updated_at", order: str = "desc"
+    request: Request,
+    q: str = "",
+    status: str = "all",
+    source: str = "all",
+    language: str = "all",
+    artifact: str = "all",
+    sort: str = "updated_at",
+    order: str = "desc",
 ):
-    videos = build_video_list(storage, q, sort, order)
+    context = build_video_dashboard(
+        storage,
+        q=q,
+        status=status,
+        source=source,
+        language=language,
+        artifact=artifact,
+        sort=sort,
+        order=order,
+    )
     return templates.TemplateResponse(
         request,
         "list.html",
-        {"request": request, "videos": videos, "q": q, "sort": sort, "order": order},
+        {"request": request, **context},
     )
 
 

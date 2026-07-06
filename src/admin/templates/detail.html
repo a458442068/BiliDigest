@@ -1,198 +1,413 @@
 {% extends "base.html" %}
 {% block title %}{{ video.title }} - BiliDigest Admin{% endblock %}
 {% block content %}
-<div class="mb-6">
-    <a href="/admin/" class="text-indigo-600 dark:text-indigo-400 hover:text-indigo-900 dark:hover:text-indigo-300">&larr; 返回列表</a>
-</div>
+{% set initial_part = contents[0].part if contents else 1 %}
+{% set initial_tab = 'summary' if contents and contents[0].summary else 'transcript' %}
+{% set current_status = progress.status or metadata.status or 'done' %}
 
-<div class="bg-white dark:bg-gray-800 shadow rounded-lg p-6 mb-6">
-    <h1 class="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-4">{{ video.title }}</h1>
-    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-        <div><span class="text-gray-500 dark:text-gray-400">来源:</span> <a href="{{ metadata.url or ('https://www.bilibili.com/video/' + bv_id) }}" target="_blank" class="text-indigo-600 dark:text-indigo-400 hover:underline">{{ metadata.source or 'bilibili' }}</a></div>
-        <div><span class="text-gray-500 dark:text-gray-400">UP主:</span> <span class="text-gray-900 dark:text-gray-100">{{ video.uploader }}</span></div>
-        <div><span class="text-gray-500 dark:text-gray-400">时长:</span> <span class="text-gray-900 dark:text-gray-100">{{ video.duration }}秒</span></div>
-        <div><span class="text-gray-500 dark:text-gray-400">分P:</span> <span class="text-gray-900 dark:text-gray-100">{{ total_parts }}</span></div>
-        <div><span class="text-gray-500 dark:text-gray-400">状态:</span> <span class="text-gray-900 dark:text-gray-100">{{ metadata.status or 'done' }}</span></div>
-    </div>
-</div>
-
-{% if metadata.error %}
-<div class="bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-lg p-4 mb-6 text-sm text-red-800 dark:text-red-300">
-    <div class="font-medium mb-1">处理失败</div>
-    <div>{{ metadata.current_step or 'unknown' }}: {{ metadata.error }}</div>
-</div>
+{% macro status_badge(status) -%}
+{% if status in ('queued', 'processing') %}
+<span id="status-badge" class="inline-flex items-center rounded-full bg-yellow-100 px-2.5 py-1 text-xs font-medium text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200">处理中</span>
+{% elif status == 'error' %}
+<span id="status-badge" class="inline-flex items-center rounded-full bg-red-100 px-2.5 py-1 text-xs font-medium text-red-800 dark:bg-red-950 dark:text-red-200">失败</span>
+{% else %}
+<span id="status-badge" class="inline-flex items-center rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200">已完成</span>
 {% endif %}
+{%- endmacro %}
 
-<div
-    x-data="progressPoller('{{ bv_id }}', {{ progress|tojson }})"
-    x-show="status === 'queued' || status === 'processing'"
-    class="bg-white dark:bg-gray-800 shadow rounded-lg p-4 mb-6"
->
-    <div class="flex items-center justify-between mb-2 text-sm">
-        <span class="text-gray-700 dark:text-gray-300 font-medium">
-            <span x-text="status === 'queued' ? '排队中' : '处理中'"></span> - <span x-text="stepLabels[current_step] || current_step"></span>
-            <span x-show="total_parts > 1" x-text="'(分P ' + current_part + '/' + total_parts + ')'"></span>
-        </span>
-        <div class="flex items-center gap-3">
-            <button type="button" @click="poll()" class="text-xs text-indigo-600 dark:text-indigo-400 hover:underline">刷新状态</button>
-            <span class="text-gray-500 dark:text-gray-400" x-text="Math.round(step_progress * 100) + '%'"></span>
+{% macro text_panel(content, tab, label, body, active) -%}
+<div data-part-panel="{{ content.part }}" data-tab-panel="{{ tab }}" class="{% if not active %}hidden{% endif %}">
+    <div class="mb-3 flex items-center justify-between border-b border-gray-200 pb-3 dark:border-gray-700">
+        <div>
+            <div class="text-sm font-semibold text-gray-950 dark:text-gray-50">{{ label }}</div>
+            <div class="text-xs text-gray-500 dark:text-gray-400">P{{ content.part }} 当前内容</div>
+        </div>
+        <div class="flex items-center gap-2 text-xs">
+            <button type="button" data-copy-target="{{ tab }}-{{ content.part }}" data-copy-label="{{ label }}" class="rounded-md border border-gray-300 px-2.5 py-1.5 font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700">复制</button>
+            <button type="button" data-reader-target="{{ tab }}-{{ content.part }}" data-reader-label="{{ label }}" class="rounded-md border border-gray-300 px-2.5 py-1.5 font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700">展开</button>
+            <a href="/api/v1/export/{{ bv_id }}/txt?part={{ content.part }}" class="rounded-md bg-indigo-600 px-2.5 py-1.5 font-medium text-white hover:bg-indigo-700">TXT</a>
+            <a href="/api/v1/export/{{ bv_id }}/md?part={{ content.part }}" class="rounded-md bg-gray-900 px-2.5 py-1.5 font-medium text-white hover:bg-gray-700 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white">MD</a>
+            <a href="/api/v1/export/{{ bv_id }}/json?part={{ content.part }}" class="rounded-md border border-gray-300 px-2.5 py-1.5 font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700">JSON</a>
         </div>
     </div>
-    <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-        <div class="bg-indigo-600 h-2 rounded-full transition-all duration-300" :style="'width:' + (step_progress * 100) + '%'"></div>
-    </div>
+    <pre id="{{ tab }}-{{ content.part }}" class="h-[620px] overflow-y-auto whitespace-pre-wrap rounded-lg bg-gray-50 p-5 {% if tab == 'transcript' %}font-mono text-sm{% else %}text-[15px]{% endif %} leading-7 text-gray-800 dark:bg-gray-900 dark:text-gray-200">{{ body }}</pre>
 </div>
+{%- endmacro %}
 
-{% for content in contents %}
-<div class="flex items-start justify-between gap-4 mb-3">
-    <div>
-        <h2 class="text-lg font-semibold text-gray-900 dark:text-gray-100">P{{ content.part }} {{ content.title }}</h2>
-        <div class="mt-1 flex flex-wrap gap-2 text-xs text-gray-500 dark:text-gray-400">
-            {% if content.duration_seconds %}<span>{{ content.duration_seconds }}秒</span>{% endif %}
-            {% if content.language %}<span>{{ content.language }}</span>{% endif %}
-            {% if content.has_audio %}<span>音频</span>{% endif %}
-            {% if content.has_transcript %}<span>转写</span>{% endif %}
-            {% if content.has_translation %}<span>翻译</span>{% endif %}
-            {% if content.has_summary %}<span>摘要</span>{% endif %}
+<div id="detail-workbench" data-bv-id="{{ bv_id }}" data-active-part="{{ initial_part }}" data-active-tab="{{ initial_tab }}" data-status="{{ current_status }}" class="space-y-6">
+    <div id="toast-stack" class="fixed right-6 top-20 z-50 space-y-2"></div>
+
+    <form id="action-form" method="post" class="hidden"></form>
+
+    <div class="sticky top-0 z-30 -mx-4 border-b border-gray-200 bg-gray-50/95 px-4 py-4 backdrop-blur dark:border-gray-700 dark:bg-gray-900/95 sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
+        <div class="flex items-center justify-between gap-6">
+            <div class="min-w-0">
+                <a href="/admin/" class="text-sm font-medium text-indigo-700 hover:text-indigo-900 dark:text-indigo-300 dark:hover:text-indigo-200">&larr; 返回工作台</a>
+                <div class="mt-2 flex items-center gap-3">
+                    <h1 class="truncate text-2xl font-semibold text-gray-950 dark:text-gray-50">{{ video.title }}</h1>
+                    {{ status_badge(current_status) }}
+                </div>
+            </div>
+            <div class="flex shrink-0 items-center gap-2">
+                <button type="button" data-confirm-title="重跑当前分P" data-confirm-body="从 STT 开始重跑当前分P，并覆盖该分P的转写、翻译和摘要。" data-confirm-action="/admin/video/{{ bv_id }}/reprocess/stt?part={{ initial_part }}" data-confirm-submit="重跑当前P" data-confirm-kind="warning" class="rounded-md border border-yellow-300 bg-yellow-50 px-3 py-2 text-sm font-medium text-yellow-800 hover:bg-yellow-100 dark:border-yellow-700 dark:bg-yellow-950 dark:text-yellow-200 dark:hover:bg-yellow-900">
+                    重跑当前P
+                </button>
+                <div class="relative">
+                    <button id="reprocess-menu-button" type="button" class="rounded-md bg-yellow-500 px-3 py-2 text-sm font-medium text-white hover:bg-yellow-600">重新处理</button>
+                    <div id="reprocess-menu" class="absolute right-0 mt-2 hidden w-64 overflow-hidden rounded-md border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800">
+                        <button type="button" data-confirm-title="全部重跑" data-confirm-body="重新下载并覆盖该视频的所有处理结果。" data-confirm-action="/admin/video/{{ bv_id }}/reprocess" data-confirm-submit="全部重跑" data-confirm-kind="warning" class="block w-full px-4 py-3 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-700">
+                            <span class="block font-medium text-gray-950 dark:text-gray-50">全部重跑</span>
+                            <span class="text-xs text-gray-500 dark:text-gray-400">覆盖音频、转写、翻译和摘要</span>
+                        </button>
+                        <button type="button" data-confirm-title="从 STT 开始" data-confirm-body="保留音频，覆盖转写和下游结果。" data-confirm-action="/admin/video/{{ bv_id }}/reprocess/stt" data-confirm-submit="从 STT 开始" data-confirm-kind="warning" class="block w-full px-4 py-3 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-700">
+                            <span class="block font-medium text-gray-950 dark:text-gray-50">从 STT 开始</span>
+                            <span class="text-xs text-gray-500 dark:text-gray-400">保留音频</span>
+                        </button>
+                        <button type="button" data-confirm-title="从翻译开始" data-confirm-body="保留音频和文字稿，覆盖翻译、整理版和摘要。" data-confirm-action="/admin/video/{{ bv_id }}/reprocess/translation" data-confirm-submit="从翻译开始" data-confirm-kind="warning" class="block w-full px-4 py-3 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-700">
+                            <span class="block font-medium text-gray-950 dark:text-gray-50">从翻译开始</span>
+                            <span class="text-xs text-gray-500 dark:text-gray-400">保留音频和文字稿</span>
+                        </button>
+                        <button type="button" data-confirm-title="从摘要开始" data-confirm-body="保留音频、文字稿和翻译，仅覆盖整理版和摘要。" data-confirm-action="/admin/video/{{ bv_id }}/reprocess/summary" data-confirm-submit="从摘要开始" data-confirm-kind="warning" class="block w-full px-4 py-3 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-700">
+                            <span class="block font-medium text-gray-950 dark:text-gray-50">从摘要开始</span>
+                            <span class="text-xs text-gray-500 dark:text-gray-400">只刷新摘要链路</span>
+                        </button>
+                    </div>
+                </div>
+                <button type="button" data-confirm-title="删除视频结果" data-confirm-body="删除该视频目录中的所有处理结果，此操作不可撤销。" data-confirm-action="/admin/video/{{ bv_id }}/delete" data-confirm-submit="确认删除" data-confirm-kind="danger" class="rounded-md bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700">删除</button>
+            </div>
+        </div>
+
+        <div id="progress-panel" class="{% if current_status not in ('queued', 'processing') %}hidden{% endif %} mt-4 rounded-lg border border-yellow-200 bg-yellow-50 p-3 dark:border-yellow-800 dark:bg-yellow-950">
+            <div class="mb-2 flex items-center justify-between text-sm">
+                <div class="font-medium text-yellow-900 dark:text-yellow-100">
+                    <span id="progress-status">{{ '排队中' if current_status == 'queued' else '处理中' }}</span>
+                    <span class="mx-1">/</span>
+                    <span id="progress-step">{{ progress.current_step or metadata.current_step or 'done' }}</span>
+                    <span id="progress-part">{% if total_parts > 1 %}/ P{{ progress.current_part or metadata.current_part or 1 }} of {{ total_parts }}{% endif %}</span>
+                </div>
+                <div class="text-yellow-800 dark:text-yellow-200">
+                    自动更新中 · <span id="progress-percent">{{ '%.0f'|format((progress.step_progress or metadata.step_progress or 0) * 100) }}%</span>
+                </div>
+            </div>
+            <div class="h-2 rounded-full bg-yellow-200 dark:bg-yellow-900">
+                <div id="progress-bar" class="h-2 rounded-full bg-yellow-600 transition-all duration-300" style="width: {{ '%.0f'|format((progress.step_progress or metadata.step_progress or 0) * 100) }}%"></div>
+            </div>
         </div>
     </div>
-    <div class="flex flex-wrap gap-2 text-sm">
-        <form method="post" action="/admin/video/{{ bv_id }}/reprocess/stt?part={{ content.part }}" onsubmit="return confirm('只重跑当前分P的STT及下游步骤？')">
-            <button type="submit" class="text-yellow-700 dark:text-yellow-400 hover:underline">重跑本P</button>
-        </form>
-    </div>
-</div>
 
-{% if (metadata.source or 'bilibili') == 'bilibili' %}
-<div class="mb-6">
-    <div class="relative w-full" style="padding-top: 56.25%;">
-        <iframe
-            class="absolute top-0 left-0 w-full h-full rounded-lg"
-            src="https://player.bilibili.com/player.html?bvid={{ bv_id }}{% if total_parts > 1 %}&p={{ content.part }}{% endif %}"
-            allowfullscreen>
-        </iframe>
-    </div>
-</div>
-{% endif %}
-
-<div class="mb-6">
-    <audio controls class="w-full" preload="none">
-        <source src="/results/{{ bv_id }}/{% if total_parts > 1 %}P{{ content.part }}_{% endif %}audio.wav" type="audio/wav">
-        您的浏览器不支持音频播放
-    </audio>
-    <div class="flex flex-wrap gap-3 mt-2 text-sm">
-        <a href="/api/v1/export/{{ bv_id }}/srt?part={{ content.part }}" class="text-indigo-600 dark:text-indigo-400 hover:underline">下载 SRT</a>
-        <a href="/api/v1/export/{{ bv_id }}/vtt?part={{ content.part }}" class="text-indigo-600 dark:text-indigo-400 hover:underline">下载 VTT</a>
-        <a href="/api/v1/export/{{ bv_id }}/txt?part={{ content.part }}" class="text-indigo-600 dark:text-indigo-400 hover:underline">下载 TXT</a>
-        <a href="/api/v1/export/{{ bv_id }}/md?part={{ content.part }}" class="text-indigo-600 dark:text-indigo-400 hover:underline">下载 MD</a>
-        <a href="/api/v1/export/{{ bv_id }}/json?part={{ content.part }}" class="text-indigo-600 dark:text-indigo-400 hover:underline">下载 JSON</a>
-    </div>
-</div>
-
-<div class="mb-6" x-data="{ tab: 'transcript' }">
-    <div class="border-b border-gray-200 dark:border-gray-700 mb-4">
-        <nav class="flex gap-4">
-            <button @click="tab = 'transcript'" :class="tab === 'transcript' ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400' : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'" class="py-2 px-1 border-b-2 font-medium text-sm">文字稿</button>
-            {% if content.translation %}
-            <button @click="tab = 'translation'" :class="tab === 'translation' ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400' : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'" class="py-2 px-1 border-b-2 font-medium text-sm">翻译</button>
-            {% endif %}
-            {% if content.transcript_clean %}
-            <button @click="tab = 'clean'" :class="tab === 'clean' ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400' : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'" class="py-2 px-1 border-b-2 font-medium text-sm">整理版</button>
-            {% endif %}
-            {% if content.summary %}
-            <button @click="tab = 'summary'" :class="tab === 'summary' ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400' : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'" class="py-2 px-1 border-b-2 font-medium text-sm">摘要</button>
-            {% endif %}
-        </nav>
-    </div>
-
-    <div x-show="tab === 'transcript'" class="bg-gray-50 dark:bg-gray-700 rounded-lg p-4 max-h-96 overflow-y-auto">
-        <div class="flex justify-end mb-2">
-            <button type="button" onclick="copyText('transcript-{{ content.part }}')" class="text-xs text-indigo-600 dark:text-indigo-400 hover:underline">复制</button>
-        </div>
-        <pre id="transcript-{{ content.part }}" class="whitespace-pre-wrap text-sm text-gray-700 dark:text-gray-300">{{ content.transcript or '无文字稿' }}</pre>
-    </div>
-    {% if content.translation %}
-    <div x-show="tab === 'translation'" class="bg-gray-50 dark:bg-gray-700 rounded-lg p-4 max-h-96 overflow-y-auto" style="display:none">
-        <pre class="whitespace-pre-wrap text-sm text-gray-700 dark:text-gray-300">{{ content.translation }}</pre>
+    {% if metadata.error %}
+    <div class="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200">
+        <div class="font-medium">处理失败</div>
+        <div class="mt-1">{{ metadata.current_step or 'unknown' }}: {{ metadata.error }}</div>
     </div>
     {% endif %}
-    {% if content.transcript_clean %}
-    <div x-show="tab === 'clean'" class="bg-gray-50 dark:bg-gray-700 rounded-lg p-4 max-h-96 overflow-y-auto" style="display:none">
-        <pre class="whitespace-pre-wrap text-sm text-gray-700 dark:text-gray-300">{{ content.transcript_clean }}</pre>
-    </div>
-    {% endif %}
-    {% if content.summary %}
-    <div x-show="tab === 'summary'" class="bg-gray-50 dark:bg-gray-700 rounded-lg p-4 max-h-96 overflow-y-auto" style="display:none">
-        <pre class="whitespace-pre-wrap text-sm text-gray-700 dark:text-gray-300">{{ content.summary }}</pre>
-    </div>
-    {% endif %}
-</div>
-{% endfor %}
 
-<div class="flex gap-4 mt-8" x-data="{ open: false }">
-    <div class="relative">
-        <button @click="open = !open" class="bg-yellow-500 text-white px-4 py-2 rounded-md hover:bg-yellow-600 flex items-center gap-1">
-            重新处理
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
-        </button>
-        <div x-show="open" @click.away="open = false" x-transition class="absolute left-0 mt-1 w-40 bg-white dark:bg-gray-800 rounded-md shadow-lg border border-gray-200 dark:border-gray-700 z-10">
-            <form method="post" action="/admin/video/{{ bv_id }}/reprocess" onsubmit="return confirm('确认重新处理？将覆盖所有结果。')">
-                <button type="submit" class="block w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700">全部重跑</button>
-            </form>
-            <form method="post" action="/admin/video/{{ bv_id }}/reprocess/stt" onsubmit="return confirm('从STT开始重跑？将保留音频。')">
-                <button type="submit" class="block w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700">从STT开始</button>
-            </form>
-            {% if parts and parts[0].get('has_translation') %}
-            <form method="post" action="/admin/video/{{ bv_id }}/reprocess/translation" onsubmit="return confirm('从翻译开始重跑？将保留音频和文字稿。')">
-                <button type="submit" class="block w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700">从翻译开始</button>
-            </form>
-            {% endif %}
-            <form method="post" action="/admin/video/{{ bv_id }}/reprocess/summary" onsubmit="return confirm('从摘要开始重跑？将保留音频、文字稿和翻译。')">
-                <button type="submit" class="block w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700">从摘要开始</button>
-            </form>
+    <div class="grid grid-cols-[440px_minmax(0,1fr)] gap-6">
+        <aside class="space-y-4">
+            <div class="rounded-lg border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800">
+                {% for content in contents %}
+                <div data-part-media="{{ content.part }}" class="{% if content.part != initial_part %}hidden{% endif %}">
+                    {% if (metadata.source or 'bilibili') == 'bilibili' %}
+                    <div class="relative w-full overflow-hidden rounded-lg bg-black" style="padding-top: 56.25%;">
+                        <iframe class="absolute left-0 top-0 h-full w-full" src="https://player.bilibili.com/player.html?bvid={{ bv_id }}{% if total_parts > 1 %}&p={{ content.part }}{% endif %}" allowfullscreen></iframe>
+                    </div>
+                    {% else %}
+                    <div class="rounded-lg bg-gray-100 p-6 text-sm text-gray-500 dark:bg-gray-900 dark:text-gray-400">当前来源没有可嵌入播放器。</div>
+                    {% endif %}
+                    <div class="mt-4">
+                        <audio controls class="w-full" preload="none">
+                            <source src="/results/{{ bv_id }}/{% if total_parts > 1 %}P{{ content.part }}_{% endif %}audio.wav" type="audio/wav">
+                            您的浏览器不支持音频播放
+                        </audio>
+                        <div class="mt-3 flex flex-wrap gap-2 text-xs">
+                            <a href="/api/v1/export/{{ bv_id }}/srt?part={{ content.part }}" class="rounded-md border border-gray-300 px-2.5 py-1.5 font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700">SRT</a>
+                            <a href="/api/v1/export/{{ bv_id }}/vtt?part={{ content.part }}" class="rounded-md border border-gray-300 px-2.5 py-1.5 font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700">VTT</a>
+                            <a href="/api/v1/export/{{ bv_id }}/txt?part={{ content.part }}" class="rounded-md border border-gray-300 px-2.5 py-1.5 font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700">TXT</a>
+                            <a href="/api/v1/export/{{ bv_id }}/md?part={{ content.part }}" class="rounded-md border border-gray-300 px-2.5 py-1.5 font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700">MD</a>
+                            <a href="/api/v1/export/{{ bv_id }}/json?part={{ content.part }}" class="rounded-md border border-gray-300 px-2.5 py-1.5 font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700">JSON</a>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+
+            <div class="rounded-lg border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800">
+                <h2 class="text-sm font-semibold text-gray-950 dark:text-gray-50">视频信息</h2>
+                <dl class="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
+                    <div>
+                        <dt class="text-xs text-gray-500 dark:text-gray-400">来源</dt>
+                        <dd><a href="{{ metadata.url or ('https://www.bilibili.com/video/' + bv_id) }}" target="_blank" class="font-medium text-indigo-700 hover:underline dark:text-indigo-300">{{ metadata.source or 'bilibili' }}</a></dd>
+                    </div>
+                    <div>
+                        <dt class="text-xs text-gray-500 dark:text-gray-400">BV ID</dt>
+                        <dd class="font-medium text-gray-950 dark:text-gray-50">{{ bv_id }}</dd>
+                    </div>
+                    <div>
+                        <dt class="text-xs text-gray-500 dark:text-gray-400">UP主</dt>
+                        <dd class="font-medium text-gray-950 dark:text-gray-50">{{ video.uploader or '-' }}</dd>
+                    </div>
+                    <div>
+                        <dt class="text-xs text-gray-500 dark:text-gray-400">时长</dt>
+                        <dd class="font-medium text-gray-950 dark:text-gray-50">{% if video.duration %}{{ '%.0f'|format(video.duration) }}秒{% else %}-{% endif %}</dd>
+                    </div>
+                    <div>
+                        <dt class="text-xs text-gray-500 dark:text-gray-400">分P</dt>
+                        <dd class="font-medium text-gray-950 dark:text-gray-50">{{ total_parts }}</dd>
+                    </div>
+                    <div>
+                        <dt class="text-xs text-gray-500 dark:text-gray-400">状态</dt>
+                        <dd id="status-text" class="font-medium text-gray-950 dark:text-gray-50">{{ current_status }}</dd>
+                    </div>
+                </dl>
+            </div>
+
+            <div class="rounded-lg border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800">
+                <div class="mb-3 flex items-center justify-between">
+                    <h2 class="text-sm font-semibold text-gray-950 dark:text-gray-50">分P导航</h2>
+                    <span class="text-xs text-gray-500 dark:text-gray-400">{{ contents|length }} 个分P</span>
+                </div>
+                <div class="space-y-2">
+                    {% for content in contents %}
+                    {% set default_tab = 'summary' if content.summary else 'transcript' %}
+                    <button type="button" data-part-button="{{ content.part }}" data-default-tab="{{ default_tab }}" data-reprocess-action="/admin/video/{{ bv_id }}/reprocess/stt?part={{ content.part }}" class="w-full rounded-md border p-3 text-left {% if content.part == initial_part %}border-indigo-500 bg-indigo-50 dark:bg-indigo-950{% else %}border-gray-200 bg-white hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:hover:bg-gray-700{% endif %}">
+                        <div class="flex items-center justify-between gap-3">
+                            <span class="truncate text-sm font-medium text-gray-950 dark:text-gray-50">P{{ content.part }} {{ content.title }}</span>
+                            <span class="text-xs text-gray-500 dark:text-gray-400">{{ content.duration_label }}</span>
+                        </div>
+                        <div class="mt-2 flex flex-wrap gap-1 text-[11px]">
+                            {% if content.language %}<span class="rounded bg-gray-100 px-1.5 py-0.5 text-gray-600 dark:bg-gray-700 dark:text-gray-300">{{ content.language }}</span>{% endif %}
+                            {% if content.has_audio %}<span class="rounded bg-gray-100 px-1.5 py-0.5 text-gray-600 dark:bg-gray-700 dark:text-gray-300">音频</span>{% endif %}
+                            {% if content.has_transcript %}<span class="rounded bg-emerald-50 px-1.5 py-0.5 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-200">转写</span>{% endif %}
+                            {% if content.has_translation %}<span class="rounded bg-blue-50 px-1.5 py-0.5 text-blue-700 dark:bg-blue-950 dark:text-blue-200">翻译</span>{% endif %}
+                            {% if content.has_summary %}<span class="rounded bg-indigo-50 px-1.5 py-0.5 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-200">摘要</span>{% endif %}
+                        </div>
+                    </button>
+                    {% endfor %}
+                </div>
+            </div>
+        </aside>
+
+        <section class="min-w-0 rounded-lg border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-800">
+            {% for content in contents %}
+            {% set default_tab = 'summary' if content.summary else 'transcript' %}
+            <div data-part-content="{{ content.part }}" class="{% if content.part != initial_part %}hidden{% endif %}">
+                <div class="border-b border-gray-200 px-5 dark:border-gray-700">
+                    <div class="flex items-center justify-between gap-4">
+                        <div class="min-w-0">
+                            <h2 class="truncate text-lg font-semibold text-gray-950 dark:text-gray-50">P{{ content.part }} {{ content.title }}</h2>
+                        </div>
+                        <nav class="flex shrink-0 items-center gap-4">
+                            {% if content.summary %}
+                            <button type="button" data-tab-button="{{ content.part }}:summary" class="border-b-2 px-1 py-3 text-sm font-medium {% if default_tab == 'summary' %}border-indigo-500 text-indigo-700 dark:text-indigo-300{% else %}border-transparent text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200{% endif %}">摘要</button>
+                            {% endif %}
+                            <button type="button" data-tab-button="{{ content.part }}:transcript" class="border-b-2 px-1 py-3 text-sm font-medium {% if default_tab == 'transcript' %}border-indigo-500 text-indigo-700 dark:text-indigo-300{% else %}border-transparent text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200{% endif %}">文字稿</button>
+                            {% if content.translation %}
+                            <button type="button" data-tab-button="{{ content.part }}:translation" class="border-b-2 border-transparent px-1 py-3 text-sm font-medium text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200">翻译</button>
+                            {% endif %}
+                            {% if content.transcript_clean %}
+                            <button type="button" data-tab-button="{{ content.part }}:clean" class="border-b-2 border-transparent px-1 py-3 text-sm font-medium text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200">整理版</button>
+                            {% endif %}
+                        </nav>
+                    </div>
+                </div>
+
+                <div class="p-5">
+                    {% if content.summary %}
+                    {{ text_panel(content, 'summary', '摘要', content.summary, default_tab == 'summary') }}
+                    {% endif %}
+                    {{ text_panel(content, 'transcript', '文字稿', content.transcript or '无文字稿', default_tab == 'transcript') }}
+                    {% if content.translation %}
+                    {{ text_panel(content, 'translation', '翻译', content.translation, false) }}
+                    {% endif %}
+                    {% if content.transcript_clean %}
+                    {{ text_panel(content, 'clean', '整理版', content.transcript_clean, false) }}
+                    {% endif %}
+                </div>
+            </div>
+            {% endfor %}
+        </section>
+    </div>
+
+    <div id="confirm-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/40 p-6">
+        <div class="w-full max-w-md rounded-lg bg-white p-6 shadow-xl dark:bg-gray-800">
+            <div class="flex items-start gap-3">
+                <div id="confirm-icon" class="rounded-full bg-yellow-100 p-2 text-yellow-700 dark:bg-yellow-950 dark:text-yellow-200">
+                    <span class="block h-3 w-3 rounded-full bg-current"></span>
+                </div>
+                <div>
+                    <h2 id="confirm-title" class="text-lg font-semibold text-gray-950 dark:text-gray-50"></h2>
+                    <p id="confirm-body" class="mt-2 text-sm leading-6 text-gray-600 dark:text-gray-300"></p>
+                </div>
+            </div>
+            <div class="mt-6 flex justify-end gap-2">
+                <button id="confirm-cancel" type="button" class="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700">取消</button>
+                <button id="confirm-submit" type="button" class="rounded-md bg-yellow-500 px-4 py-2 text-sm font-medium text-white hover:bg-yellow-600"></button>
+            </div>
         </div>
     </div>
-    <form method="post" action="/admin/video/{{ bv_id }}/delete" onsubmit="return confirm('确认删除该视频的所有处理结果？此操作不可撤销。')">
-        <button type="submit" class="bg-red-600 text-white px-4 py-2 rounded-md hover:bg-red-700">删除</button>
-    </form>
+
+    <div id="reader-modal" class="fixed inset-0 z-50 hidden bg-gray-950/70 p-8">
+        <div class="mx-auto flex h-full max-w-5xl flex-col rounded-lg bg-white shadow-xl dark:bg-gray-900">
+            <div class="flex items-center justify-between border-b border-gray-200 px-5 py-4 dark:border-gray-700">
+                <h2 id="reader-title" class="text-lg font-semibold text-gray-950 dark:text-gray-50"></h2>
+                <button id="reader-close" type="button" class="rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700">关闭</button>
+            </div>
+            <pre id="reader-text" class="min-h-0 flex-1 overflow-y-auto whitespace-pre-wrap p-6 text-[15px] leading-7 text-gray-800 dark:text-gray-200"></pre>
+        </div>
+    </div>
 </div>
 
 <script>
-function progressPoller(bvId, initialProgress) {
-    return {
-        status: initialProgress.status || 'done',
-        current_step: initialProgress.current_step || 'done',
-        step_progress: initialProgress.step_progress || 0,
-        total_parts: initialProgress.total_parts || 1,
-        current_part: initialProgress.current_part || 1,
-        stepLabels: {
-            queued: '等待开始',
-            downloading: '下载中',
-            stt: '语音识别',
-            translating: '翻译中',
-            summarizing: '生成摘要',
-            done: '完成',
-        },
-        async poll() {
-            try {
-                const res = await fetch('/api/v1/status/' + bvId);
-                if (res.ok) {
-                    const data = await res.json();
-                    this.status = data.status;
-                    this.current_step = data.current_step;
-                    this.step_progress = data.step_progress;
-                    this.total_parts = data.total_parts;
-                    this.current_part = data.current_part;
-                }
-            } catch (e) {}
-        },
+(() => {
+    const root = document.getElementById('detail-workbench');
+    if (!root) return;
+    const state = {
+        activePart: root.dataset.activePart,
+        activeTab: root.dataset.activeTab,
+        bvId: root.dataset.bvId,
+        status: root.dataset.status,
     };
-}
+    const activeTabClasses = ['border-indigo-500', 'text-indigo-700', 'dark:text-indigo-300'];
+    const inactiveTabClasses = ['border-transparent', 'text-gray-500', 'hover:text-gray-800', 'dark:text-gray-400', 'dark:hover:text-gray-200'];
+    const activePartClasses = ['border-indigo-500', 'bg-indigo-50', 'dark:bg-indigo-950'];
+    const inactivePartClasses = ['border-gray-200', 'bg-white', 'hover:bg-gray-50', 'dark:border-gray-700', 'dark:bg-gray-800', 'dark:hover:bg-gray-700'];
 
-function copyText(id) {
-    const el = document.getElementById(id);
-    if (!el || !navigator.clipboard) return;
-    navigator.clipboard.writeText(el.innerText);
-}
+    function toast(message) {
+        const stack = document.getElementById('toast-stack');
+        if (!stack) return;
+        const item = document.createElement('div');
+        item.className = 'rounded-md bg-gray-950 px-4 py-2 text-sm font-medium text-white shadow-lg dark:bg-gray-100 dark:text-gray-950';
+        item.textContent = message;
+        stack.appendChild(item);
+        setTimeout(() => item.remove(), 2200);
+    }
+
+    function setTab(part, tab) {
+        state.activePart = String(part);
+        state.activeTab = tab;
+        root.dataset.activePart = state.activePart;
+        root.dataset.activeTab = state.activeTab;
+
+        document.querySelectorAll('[data-part-media]').forEach((el) => el.classList.toggle('hidden', el.dataset.partMedia !== state.activePart));
+        document.querySelectorAll('[data-part-content]').forEach((el) => el.classList.toggle('hidden', el.dataset.partContent !== state.activePart));
+        document.querySelectorAll('[data-part-panel]').forEach((el) => {
+            el.classList.toggle('hidden', el.dataset.partPanel !== state.activePart || el.dataset.tabPanel !== state.activeTab);
+        });
+        document.querySelectorAll('[data-tab-button]').forEach((button) => {
+            const [buttonPart, buttonTab] = button.dataset.tabButton.split(':');
+            const active = buttonPart === state.activePart && buttonTab === state.activeTab;
+            button.classList.remove(...activeTabClasses, ...inactiveTabClasses);
+            button.classList.add(...(active ? activeTabClasses : inactiveTabClasses));
+        });
+        document.querySelectorAll('[data-part-button]').forEach((button) => {
+            const active = button.dataset.partButton === state.activePart;
+            button.classList.remove(...activePartClasses, ...inactivePartClasses);
+            button.classList.add(...(active ? activePartClasses : inactivePartClasses));
+        });
+        document.querySelectorAll('[data-confirm-title="重跑当前分P"]').forEach((button) => {
+            button.dataset.confirmAction = `/admin/video/${state.bvId}/reprocess/stt?part=${state.activePart}`;
+        });
+    }
+
+    document.querySelectorAll('[data-part-button]').forEach((button) => {
+        button.addEventListener('click', () => setTab(button.dataset.partButton, button.dataset.defaultTab));
+    });
+    document.querySelectorAll('[data-tab-button]').forEach((button) => {
+        button.addEventListener('click', () => {
+            const [part, tab] = button.dataset.tabButton.split(':');
+            setTab(part, tab);
+        });
+    });
+
+    document.querySelectorAll('[data-copy-target]').forEach((button) => {
+        button.addEventListener('click', async () => {
+            const target = document.getElementById(button.dataset.copyTarget);
+            if (!target || !navigator.clipboard) return;
+            await navigator.clipboard.writeText(target.innerText);
+            toast(`${button.dataset.copyLabel}已复制`);
+        });
+    });
+
+    const readerModal = document.getElementById('reader-modal');
+    document.querySelectorAll('[data-reader-target]').forEach((button) => {
+        button.addEventListener('click', () => {
+            const target = document.getElementById(button.dataset.readerTarget);
+            if (!target || !readerModal) return;
+            document.getElementById('reader-title').textContent = button.dataset.readerLabel;
+            document.getElementById('reader-text').textContent = target.innerText;
+            readerModal.classList.remove('hidden');
+        });
+    });
+    document.getElementById('reader-close')?.addEventListener('click', () => readerModal?.classList.add('hidden'));
+
+    const menu = document.getElementById('reprocess-menu');
+    document.getElementById('reprocess-menu-button')?.addEventListener('click', () => menu?.classList.toggle('hidden'));
+    document.addEventListener('click', (event) => {
+        if (!menu || menu.classList.contains('hidden')) return;
+        const button = document.getElementById('reprocess-menu-button');
+        if (!menu.contains(event.target) && !button?.contains(event.target)) menu.classList.add('hidden');
+    });
+
+    const confirmModal = document.getElementById('confirm-modal');
+    const actionForm = document.getElementById('action-form');
+    document.querySelectorAll('[data-confirm-title]').forEach((button) => {
+        button.addEventListener('click', () => {
+            menu?.classList.add('hidden');
+            document.getElementById('confirm-title').textContent = button.dataset.confirmTitle;
+            document.getElementById('confirm-body').textContent = button.dataset.confirmBody;
+            const submit = document.getElementById('confirm-submit');
+            submit.textContent = button.dataset.confirmSubmit;
+            submit.className = button.dataset.confirmKind === 'danger'
+                ? 'rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700'
+                : 'rounded-md bg-yellow-500 px-4 py-2 text-sm font-medium text-white hover:bg-yellow-600';
+            const icon = document.getElementById('confirm-icon');
+            icon.className = button.dataset.confirmKind === 'danger'
+                ? 'rounded-full bg-red-100 p-2 text-red-700 dark:bg-red-950 dark:text-red-200'
+                : 'rounded-full bg-yellow-100 p-2 text-yellow-700 dark:bg-yellow-950 dark:text-yellow-200';
+            actionForm.action = button.dataset.confirmAction;
+            confirmModal.classList.remove('hidden');
+            confirmModal.classList.add('flex');
+        });
+    });
+    document.getElementById('confirm-cancel')?.addEventListener('click', () => {
+        confirmModal?.classList.add('hidden');
+        confirmModal?.classList.remove('flex');
+    });
+    document.getElementById('confirm-submit')?.addEventListener('click', () => actionForm?.submit());
+
+    const stepLabels = {
+        queued: '等待开始',
+        downloading: '下载中',
+        stt: '语音识别',
+        translating: '翻译中',
+        summarizing: '生成摘要',
+        done: '完成',
+    };
+    async function poll() {
+        try {
+            const res = await fetch(`/api/v1/status/${state.bvId}`);
+            if (!res.ok) return;
+            const data = await res.json();
+            state.status = data.status;
+            document.getElementById('status-text').textContent = data.status;
+            if (data.status === 'queued' || data.status === 'processing') {
+                document.getElementById('progress-panel')?.classList.remove('hidden');
+                document.getElementById('progress-status').textContent = data.status === 'queued' ? '排队中' : '处理中';
+                document.getElementById('progress-step').textContent = stepLabels[data.current_step] || data.current_step;
+                document.getElementById('progress-part').textContent = data.total_parts > 1 ? `/ P${data.current_part} of ${data.total_parts}` : '';
+                document.getElementById('progress-percent').textContent = `${Math.round(data.step_progress * 100)}%`;
+                document.getElementById('progress-bar').style.width = `${Math.max(0, Math.min(100, data.step_progress * 100))}%`;
+            } else {
+                document.getElementById('progress-panel')?.classList.add('hidden');
+            }
+        } catch (e) {
+            toast('状态更新失败');
+        }
+    }
+    if (state.status === 'queued' || state.status === 'processing') {
+        poll();
+        setInterval(poll, 3000);
+    }
+})();
 </script>
 {% endblock %}

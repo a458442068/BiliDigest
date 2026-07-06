@@ -27,3 +27,8 @@ addopts = "-m 'not integration'"
 markers = [
     "integration: tests that call real download, STT, or LLM services",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
