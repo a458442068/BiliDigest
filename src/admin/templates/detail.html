@@ -50,6 +50,9 @@
                 </div>
             </div>
             <div class="flex shrink-0 items-center gap-2">
+                <button type="button" data-confirm-title="刷新视频信息" data-confirm-body="后台从远端获取标题、作者和分P信息。已有本地产物不会被删除或重跑；如果远端不可用，将保留当前信息。" data-confirm-action="/admin/video/{{ bv_id }}/refresh-metadata" data-confirm-submit="刷新信息" data-confirm-kind="info" class="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700">
+                    刷新信息
+                </button>
                 <button type="button" data-confirm-title="重跑当前分P" data-confirm-body="从 STT 开始重跑当前分P，并覆盖该分P的转写、翻译和摘要。" data-confirm-action="/admin/video/{{ bv_id }}/reprocess/stt?part={{ initial_part }}" data-confirm-submit="重跑当前P" data-confirm-kind="warning" class="rounded-md border border-yellow-300 bg-yellow-50 px-3 py-2 text-sm font-medium text-yellow-800 hover:bg-yellow-100 dark:border-yellow-700 dark:bg-yellow-950 dark:text-yellow-200 dark:hover:bg-yellow-900">
                     重跑当前P
                 </button>

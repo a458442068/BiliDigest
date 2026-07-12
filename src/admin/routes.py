@@ -3,6 +3,7 @@ from pathlib import Path
 from fastapi import APIRouter, Request, BackgroundTasks, HTTPException, Query
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+from loguru import logger
 
 from src.api.routes import pipeline
 from src.admin.view_models import build_detail_context, build_video_dashboard
@@ -22,6 +23,13 @@ def _load_metadata_or_404(bv_id: str) -> dict:
     if not metadata:
         raise HTTPException(status_code=404, detail="视频不存在")
     return metadata
+
+
+def _refresh_metadata_background(bv_id: str):
+    try:
+        pipeline.refresh_metadata(bv_id)
+    except Exception as e:
+        logger.warning(f"后台刷新视频信息失败 [{bv_id}]: {e}")
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -74,6 +82,13 @@ async def video_delete(bv_id: str):
         raise HTTPException(status_code=404, detail="视频不存在")
     pipeline.clear_progress(bv_id)
     return RedirectResponse(url="/admin/", status_code=303)
+
+
+@router.post("/video/{bv_id}/refresh-metadata")
+async def video_refresh_metadata(bv_id: str, background_tasks: BackgroundTasks):
+    _load_metadata_or_404(bv_id)
+    background_tasks.add_task(_refresh_metadata_background, bv_id)
+    return RedirectResponse(url=f"/admin/video/{bv_id}", status_code=303)
 
 
 @router.post("/video/{bv_id}/reprocess")

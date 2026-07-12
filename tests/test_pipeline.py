@@ -13,6 +13,20 @@ class FakeDownloader:
         self.audio_path = audio_path
         self.fail_download = fail_download
         self.downloaded_parts = []
+        self.probe_calls = 0
+
+    def probe_video(self, url: str) -> dict:
+        self.probe_calls += 1
+        return {
+            "video": {"title": "Demo", "uploader": "Tester", "duration": 12},
+            "parts": [PartInfo(part=1, title="P1", duration=12)],
+            "metadata_probe": {
+                "logic_version": 2,
+                "extractor": "yt-dlp",
+                "status": "ok",
+                "warnings": [],
+            },
+        }
 
     def get_video_info(self, url: str) -> dict:
         return {"title": "Demo", "uploader": "Tester", "duration": 12}
@@ -92,6 +106,10 @@ def test_process_persists_done_status(tmp_path):
     assert metadata["status"] == "done"
     assert metadata["current_step"] == "done"
     assert metadata["step_progress"] == 1.0
+    assert metadata["metadata_logic_version"] == 2
+    assert metadata["metadata_probe"]["status"] == "ok"
+    assert metadata["parts"][0]["title"] == "P1"
+    assert metadata["parts"][0]["duration_seconds"] == 12
     assert metadata["parts"][0]["has_transcript"] is True
     assert metadata["parts"][0]["has_translation"] is True
     assert metadata["parts"][0]["has_summary"] is True
@@ -163,6 +181,7 @@ def test_process_target_parts_only_reprocesses_selected_part(monkeypatch, tmp_pa
     assert metadata["parts"][1]["part"] == 2
     assert metadata["parts"][1]["language"] == "zh"
     assert metadata["parts"][1]["has_summary"] is True
+    assert pipeline.downloader.probe_calls == 0
 
 
 def test_process_from_summary_uses_existing_text_without_upstream_steps(
@@ -196,7 +215,50 @@ def test_process_from_summary_uses_existing_text_without_upstream_steps(
     )
 
     assert pipeline.downloader.downloaded_parts == []
+    assert pipeline.downloader.probe_calls == 0
     assert pipeline.stt.calls == 0
     assert pipeline.translator.calls == 0
     assert pipeline.summarizer.calls == 1
     assert pipeline.storage.load_summary(bv_id, 1, 1)["summary"] == "summary"
+
+
+def test_refresh_metadata_preserves_existing_when_probe_returns_empty(
+    monkeypatch, tmp_path
+):
+    pipeline = build_pipeline(tmp_path)
+    bv_id = "BV1xx411c7mD"
+    pipeline.storage.save_metadata(
+        bv_id,
+        {
+            "bv_id": bv_id,
+            "url": f"https://www.bilibili.com/video/{bv_id}",
+            "video": {"title": "Old title", "uploader": "Old uploader"},
+            "total_parts": 2,
+            "parts": [
+                {"part": 1, "title": "Old P1", "duration_seconds": 12},
+                {"part": 2, "title": "Old P2", "duration_seconds": 34},
+            ],
+        },
+    )
+
+    monkeypatch.setattr(
+        pipeline,
+        "_probe_video",
+        lambda url: (
+            {},
+            [PartInfo(part=1, title="", duration=None)],
+            {
+                "logic_version": 2,
+                "extractor": "yt-dlp",
+                "status": "warning",
+                "warnings": ["gone"],
+            },
+        ),
+    )
+
+    metadata = pipeline.refresh_metadata(bv_id)
+
+    assert metadata["video"]["title"] == "Old title"
+    assert metadata["total_parts"] == 2
+    assert [part["title"] for part in metadata["parts"]] == ["Old P1", "Old P2"]
+    assert metadata["metadata_probe"]["status"] == "warning"

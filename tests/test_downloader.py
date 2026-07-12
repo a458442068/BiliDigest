@@ -1,4 +1,5 @@
 import pytest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -83,5 +84,51 @@ class TestBilibiliDownloader:
             with pytest.raises(DownloadError):
                 downloader.download("BV1xx411c7mD")
 
+        assert seen_cookie_paths
+        assert all(not path.exists() for path in seen_cookie_paths)
+
+    def test_probe_video_parses_json_lines_for_multi_part(self, tmp_path):
+        downloader = BilibiliDownloader(output_dir=str(tmp_path))
+
+        def fake_run(cmd, **kwargs):
+            assert "--dump-single-json" in cmd
+            return SimpleNamespace(
+                returncode=0,
+                stderr="",
+                stdout=(
+                    '{"title":"P1","uploader":"Tester","playlist_index":1,"duration":12}\n'
+                    '{"title":"P2","uploader":"Tester","playlist_index":2,"duration":34}\n'
+                ),
+            )
+
+        with patch("subprocess.run", side_effect=fake_run):
+            result = downloader.probe_video("BV1xx411c7mD")
+
+        assert result["metadata_probe"]["status"] == "ok"
+        assert result["video"]["title"] == "P1"
+        assert [(p.part, p.title, p.duration) for p in result["parts"]] == [
+            (1, "P1", 12.0),
+            (2, "P2", 34.0),
+        ]
+
+    def test_probe_video_uses_cookie_for_metadata(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("src.services.downloader.settings.bilibili_cookie", "SESSDATA=demo")
+        downloader = BilibiliDownloader(output_dir=str(tmp_path))
+        seen_cookie_paths = []
+
+        def fake_run(cmd, **kwargs):
+            cookie_path = Path(cmd[cmd.index("--cookies") + 1])
+            seen_cookie_paths.append(cookie_path)
+            assert cookie_path.exists()
+            return SimpleNamespace(
+                returncode=0,
+                stderr="",
+                stdout='{"title":"Demo","duration":12}',
+            )
+
+        with patch("subprocess.run", side_effect=fake_run):
+            result = downloader.probe_video("BV1xx411c7mD")
+
+        assert result["video"]["title"] == "Demo"
         assert seen_cookie_paths
         assert all(not path.exists() for path in seen_cookie_paths)

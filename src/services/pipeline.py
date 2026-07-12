@@ -10,7 +10,7 @@ from src.exceptions import (
     STTError,
     ProcessError,
 )
-from src.services.downloader import BilibiliDownloader
+from src.services.downloader import BilibiliDownloader, METADATA_LOGIC_VERSION
 from src.services.stt import SpeechToText
 from src.services.translator import Translator
 from src.services.summarizer import Summarizer
@@ -23,7 +23,7 @@ from src.services.processing_steps import (
     TranscribeStep,
     TranslateStep,
 )
-from src.utils.bv import get_parts, get_source_name
+from src.utils.bv import PartInfo, get_parts, get_source_name
 from src.utils.storage import ResultStorage
 
 # STT 专用线程池：max_workers=1 保证 GPU 串行，避免显存争抢
@@ -130,6 +130,63 @@ class ProcessingPipeline:
             metadata["created_at"] = metadata["updated_at"]
         self.storage.save_metadata(bv_id, metadata)
 
+    def _parts_from_metadata(self, metadata: dict) -> list:
+        parts = metadata.get("parts") or []
+        if parts:
+            return [
+                PartInfo(
+                    part=part.get("part", index),
+                    title=part.get("title", ""),
+                    duration=part.get("duration_seconds") or part.get("duration"),
+                )
+                for index, part in enumerate(parts, start=1)
+            ]
+        total_parts = metadata.get("total_parts") or 1
+        video = metadata.get("video", {})
+        return [
+            PartInfo(
+                part=part,
+                title=video.get("title", "") if part == 1 else "",
+                duration=video.get("duration") if part == 1 else None,
+            )
+            for part in range(1, total_parts + 1)
+        ]
+
+    def _is_placeholder_parts(self, parts: list) -> bool:
+        return (
+            len(parts) == 1
+            and parts[0].part == 1
+            and not parts[0].title
+            and parts[0].duration is None
+        )
+
+    def _probe_video(self, url: str) -> tuple[dict, list, dict | None]:
+        if hasattr(self.downloader, "probe_video"):
+            probe_result = self.downloader.probe_video(url)
+            return (
+                probe_result.get("video", {}),
+                probe_result.get("parts") or [PartInfo(part=1, title="")],
+                probe_result.get("metadata_probe"),
+            )
+        return self.downloader.get_video_info(url), get_parts(url), None
+
+    def refresh_metadata(self, bv_id: str) -> dict:
+        metadata = self.storage.load_metadata(bv_id)
+        if not metadata:
+            raise ValueError(f"视频不存在: {bv_id}")
+        url = metadata.get("url", f"https://www.bilibili.com/video/{bv_id}")
+        video_info, parts, metadata_probe = self._probe_video(url)
+        self._update_metadata(
+            bv_id,
+            url,
+            [],
+            parts,
+            video_info,
+            metadata_probe=metadata_probe,
+            preserve_existing=True,
+        )
+        return self.storage.load_metadata(bv_id)
+
     async def process(
         self,
         url: str,
@@ -154,14 +211,19 @@ class ProcessingPipeline:
         video_ref = VideoRef.from_input(request.url)
         bv_id = video_ref.bv_id
         video_url = video_ref.url
-        self.mark_queued(bv_id)
+        existing_metadata = await _to_thread(self.storage.load_metadata, bv_id)
+        existing_parts = self._parts_from_metadata(existing_metadata) if existing_metadata else []
+        self.mark_queued(bv_id, len(existing_parts) or 1)
 
         try:
-            # Get video info
-            video_info = await _to_thread(self.downloader.get_video_info, request.url)
-
-            # Get parts info
-            parts = await _to_thread(get_parts, request.url)
+            if existing_metadata:
+                video_info = existing_metadata.get("video", {})
+                parts = existing_parts
+                metadata_probe = existing_metadata.get("metadata_probe")
+            else:
+                video_info, parts, metadata_probe = await _to_thread(
+                    self._probe_video, request.url
+                )
             total_parts = len(parts)
             part_numbers = {part.part for part in parts}
             selected_parts = parts
@@ -199,6 +261,7 @@ class ProcessingPipeline:
                 request.force,
                 request.from_step,
                 video_info,
+                metadata_probe,
             )
         except Exception as e:
             error_message = getattr(e, "message", str(e)) or "处理失败"
@@ -238,6 +301,7 @@ class ProcessingPipeline:
         force: bool,
         from_step: ProcessingStep | None,
         video_info: dict,
+        metadata_probe: dict | None,
     ) -> dict:
         # Load existing metadata
         metadata = await _to_thread(self.storage.load_metadata, bv_id)
@@ -253,7 +317,15 @@ class ProcessingPipeline:
             )
 
         # 写入初始 metadata（has_* 全为 false，admin 页面可见处理中状态）
-        await _to_thread(self._update_metadata, bv_id, video_url, [], parts, video_info)
+        await _to_thread(
+            self._update_metadata,
+            bv_id,
+            video_url,
+            [],
+            parts,
+            video_info,
+            metadata_probe,
+        )
 
         results = []
         steps = self._steps_for_request(translate, summarize, from_step)
@@ -271,6 +343,7 @@ class ProcessingPipeline:
                 cached_steps,
                 video_info,
                 parts,
+                metadata_probe,
             )
             results.append(part_result)
 
@@ -282,6 +355,7 @@ class ProcessingPipeline:
             results,
             parts,
             video_info,
+            metadata_probe,
         )
 
         # Build response (return first part result for API compatibility)
@@ -344,6 +418,7 @@ class ProcessingPipeline:
         cached_steps: list,
         video_info: dict,
         parts: list,
+        metadata_probe: dict | None,
     ) -> dict:
         result = {"part": part}
         context = StepContext(
@@ -383,7 +458,13 @@ class ProcessingPipeline:
                     step_progress=1.0,
                 )
                 await _to_thread(
-                    self._update_metadata, bv_id, url, [result], parts, video_info
+                    self._update_metadata,
+                    bv_id,
+                    url,
+                    [result],
+                    parts,
+                    video_info,
+                    metadata_probe,
                 )
 
             return result
@@ -430,13 +511,22 @@ class ProcessingPipeline:
         results: list,
         parts: list,
         video_info: dict | None = None,
+        metadata_probe: dict | None = None,
+        preserve_existing: bool = False,
     ):
         metadata = self.storage.load_metadata(bv_id)
+        if (
+            preserve_existing
+            and metadata.get("parts")
+            and self._is_placeholder_parts(parts)
+        ):
+            parts = self._parts_from_metadata(metadata)
         metadata.update(
             {
                 "url": url,
                 "bv_id": bv_id,
                 "source": get_source_name(url),
+                "metadata_logic_version": METADATA_LOGIC_VERSION,
                 "stt_model": settings.qwen_asr_model_path,
                 "llm_model": self._get_current_llm_model(),
                 "total_parts": len(parts) or 1,
@@ -444,14 +534,43 @@ class ProcessingPipeline:
             }
         )
         if video_info:
-            metadata["video"] = video_info
+            existing_video = metadata.get("video", {}) if preserve_existing else {}
+            metadata["video"] = {
+                **existing_video,
+                **{k: v for k, v in video_info.items() if v not in (None, "")},
+            }
         elif "video" not in metadata:
             metadata["video"] = {}
+        if metadata_probe:
+            metadata["metadata_probe"] = {
+                **metadata_probe,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
         if "created_at" not in metadata:
             metadata["created_at"] = metadata["updated_at"]
 
         # Update parts info
         parts_meta = metadata.get("parts", [])
+        total_parts = len(parts) or 1
+        for part_info in parts:
+            part_entry = next(
+                (p for p in parts_meta if p.get("part") == part_info.part), None
+            )
+            if not part_entry:
+                part_entry = {"part": part_info.part}
+                parts_meta.append(part_entry)
+            part_update = {
+                "title": part_info.title,
+                "duration_seconds": part_info.duration,
+            }
+            if preserve_existing:
+                part_update = {
+                    key: value
+                    for key, value in part_update.items()
+                    if value not in (None, "")
+                }
+            part_entry.update(part_update)
+
         for i, result in enumerate(results):
             part_num = result.get("part", i + 1)
             part_entry = next((p for p in parts_meta if p["part"] == part_num), None)
@@ -459,7 +578,6 @@ class ProcessingPipeline:
                 part_entry = {"part": part_num}
                 parts_meta.append(part_entry)
 
-            total_parts = len(parts)
             artifacts = self.storage.list_part_artifacts(bv_id, part_num, total_parts)
             update_dict = {
                 "has_audio": artifacts[ArtifactKind.AUDIO.value],

@@ -117,6 +117,7 @@ def test_admin_detail_shows_part_metadata(monkeypatch, tmp_path):
     assert "TXT" in response.text
     assert "复制" in response.text
     assert "展开" in response.text
+    assert "刷新信息" in response.text
     assert "重跑当前P" in response.text
     assert "setInterval" in response.text
     assert "x-data" not in response.text
@@ -156,6 +157,26 @@ def test_reprocess_part_marks_queued_without_real_pipeline(monkeypatch, tmp_path
     assert storage.load_metadata(bv_id)["status"] == "queued"
     assert captured["request"].target_parts == {1}
     assert captured["request"].from_step == "stt"
+
+
+def test_refresh_metadata_uses_explicit_admin_action(monkeypatch, tmp_path):
+    storage = patch_storage(monkeypatch, tmp_path)
+    bv_id = seed_video(storage)
+    captured = {}
+
+    def fake_refresh(target_bv_id):
+        captured["bv_id"] = target_bv_id
+        return storage.load_metadata(target_bv_id)
+
+    monkeypatch.setattr(admin_routes.pipeline, "refresh_metadata", fake_refresh)
+
+    response = client.post(
+        f"/admin/video/{bv_id}/refresh-metadata", follow_redirects=False
+    )
+
+    assert response.status_code == 303
+    assert captured["bv_id"] == bv_id
+    assert storage.load_metadata(bv_id)["status"] == "done"
 
 
 def test_reprocess_part_deletes_only_selected_part_artifacts(monkeypatch, tmp_path):
