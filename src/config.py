@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     port: int = Field(default=8000, description="服务端口")
     log_level: str = Field(default="info", description="日志级别")
     result_dir: str = Field(default="./results", description="结果保存目录")
+    download_staging_ttl_hours: int = Field(
+        default=72, description="下载临时目录保留时长(小时)"
+    )
     stt_backend: str = Field(
         default="default", description="STT后端 (default/local/remote)"
     )

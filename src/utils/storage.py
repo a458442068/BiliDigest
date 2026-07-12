@@ -1,7 +1,10 @@
 import json
 import re
 import shutil
+import time
+from contextlib import contextmanager
 from pathlib import Path
+from uuid import uuid4
 
 from loguru import logger
 
@@ -10,6 +13,53 @@ from src.models.domain import ArtifactKind, ProcessingStep
 
 
 SAFE_BV_ID_PATTERN = re.compile(r"^(BV[1-9A-HJ-NP-Za-km-z]{10}|[0-9a-f]{12})$")
+
+
+class AudioDownloadTransaction:
+    def __init__(
+        self, storage: "ResultStorage", bv_id: str, part: int, total_parts: int
+    ):
+        self.storage = storage
+        self.bv_id = storage.validate_bv_id(bv_id)
+        self.part = part
+        self.total_parts = total_parts
+        self.final_path = storage.artifact_path(
+            self.bv_id, part, total_parts, ArtifactKind.AUDIO
+        )
+        prefix = storage._prefix(part, total_parts) or "P1_"
+        staging_root = storage.get_dir(self.bv_id) / ".staging"
+        self.work_dir = (
+            staging_root / f"download-{prefix.rstrip('_')}-{uuid4().hex}"
+        )
+
+    def __enter__(self) -> "AudioDownloadTransaction":
+        self.work_dir.mkdir(parents=True, exist_ok=False)
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        if self.work_dir.exists():
+            shutil.rmtree(self.work_dir)
+        staging_dir = self.work_dir.parent
+        try:
+            staging_dir.rmdir()
+        except OSError:
+            pass
+        return False
+
+    def commit_audio(self, audio_path: str) -> str:
+        source = Path(audio_path).resolve()
+        if not source.exists():
+            raise FileNotFoundError(f"音频文件不存在: {source}")
+        work_dir = self.work_dir.resolve()
+        if source != work_dir and work_dir not in source.parents:
+            raise ValueError(f"音频文件不在下载临时目录内: {source}")
+
+        commit_path = self.work_dir / f"{self.final_path.name}.commit"
+        if source != commit_path.resolve():
+            source.replace(commit_path)
+        commit_path.replace(self.final_path)
+        logger.info(f"已提交音频: {self.final_path}")
+        return str(self.final_path)
 
 
 class ResultStorage:
@@ -92,7 +142,13 @@ class ResultStorage:
         kind = ArtifactKind(kind)
         path = self.artifact_path(bv_id, part, total_parts, kind)
         if kind == ArtifactKind.AUDIO:
-            shutil.copy2(content, path)
+            tmp_path = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
+            try:
+                shutil.copy2(content, tmp_path)
+                tmp_path.replace(path)
+            finally:
+                if tmp_path.exists():
+                    tmp_path.unlink()
             logger.info(f"已保存音频: {path}")
             return str(path)
         if kind == ArtifactKind.SEGMENTS:
@@ -166,6 +222,45 @@ class ResultStorage:
         return self.save_artifact(
             bv_id, part, total_parts, ArtifactKind.AUDIO, audio_path
         )
+
+    @contextmanager
+    def audio_download_transaction(
+        self, bv_id: str, part: int, total_parts: int
+    ):
+        with AudioDownloadTransaction(self, bv_id, part, total_parts) as tx:
+            yield tx
+
+    def cleanup_staging(self, max_age_hours: int | None = None) -> list[Path]:
+        max_age_hours = (
+            settings.download_staging_ttl_hours
+            if max_age_hours is None
+            else max_age_hours
+        )
+        cutoff = time.time() - max_age_hours * 3600
+        deleted = []
+        if not self.result_dir.exists():
+            return deleted
+
+        staging_dirs = [
+            self.result_dir / ".staging",
+            *self.result_dir.glob("*/.staging"),
+        ]
+        for staging_dir in staging_dirs:
+            if not staging_dir.is_dir():
+                continue
+            for child in staging_dir.iterdir():
+                if not child.is_dir():
+                    continue
+                if child.stat().st_mtime > cutoff:
+                    continue
+                shutil.rmtree(child)
+                deleted.append(child)
+                logger.info(f"已清理下载临时目录: {child}")
+            try:
+                next(staging_dir.iterdir())
+            except StopIteration:
+                staging_dir.rmdir()
+        return deleted
 
     def save_transcript(self, bv_id: str, part: int, total_parts: int, transcript: str):
         self.save_artifact(

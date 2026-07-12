@@ -1,3 +1,7 @@
+import os
+import time
+from pathlib import Path
+
 import pytest
 
 from src.models.domain import ArtifactKind
@@ -66,6 +70,59 @@ class TestResultStorageSafety:
         assert artifacts["segments"] is True
         assert artifacts["translation"] is False
         assert storage.load_artifact(bv_id, 1, 2, "transcript") == "hello world"
+
+    def test_audio_download_transaction_moves_audio_to_final_path(self, tmp_path):
+        storage = ResultStorage(str(tmp_path))
+        bv_id = "BV1xx411c7mD"
+
+        with storage.audio_download_transaction(bv_id, 1, 1) as tx:
+            source = tx.work_dir / "audio.wav"
+            source.write_bytes(b"audio")
+
+            final_path = Path(tx.commit_audio(str(source)))
+            work_dir = tx.work_dir
+
+            assert final_path.read_bytes() == b"audio"
+            assert not source.exists()
+
+        assert not work_dir.exists()
+        assert not (tmp_path / bv_id / ".staging").exists()
+
+    def test_audio_download_transaction_rolls_back_without_replacing_final(
+        self, tmp_path
+    ):
+        storage = ResultStorage(str(tmp_path))
+        bv_id = "BV1xx411c7mD"
+        existing = tmp_path / "existing.wav"
+        existing.write_bytes(b"old")
+        final_path = Path(storage.save_audio(bv_id, 1, 1, str(existing)))
+
+        with pytest.raises(RuntimeError):
+            with storage.audio_download_transaction(bv_id, 1, 1) as tx:
+                staged = tx.work_dir / "audio.wav"
+                staged.write_bytes(b"new")
+                work_dir = tx.work_dir
+                raise RuntimeError("boom")
+
+        assert final_path.read_bytes() == b"old"
+        assert not work_dir.exists()
+
+    def test_cleanup_staging_removes_old_orphan_download_dirs(self, tmp_path):
+        storage = ResultStorage(str(tmp_path))
+        bv_id = "BV1xx411c7mD"
+        staging_dir = storage.get_dir(bv_id) / ".staging"
+        old_dir = staging_dir / "download-old"
+        fresh_dir = staging_dir / "download-fresh"
+        old_dir.mkdir(parents=True)
+        fresh_dir.mkdir()
+        old_time = time.time() - 7200
+        os.utime(old_dir, (old_time, old_time))
+
+        deleted = storage.cleanup_staging(max_age_hours=1)
+
+        assert old_dir in deleted
+        assert not old_dir.exists()
+        assert fresh_dir.exists()
 
     def test_delete_artifacts_respects_from_step(self, tmp_path):
         storage = ResultStorage(str(tmp_path))

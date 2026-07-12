@@ -47,6 +47,7 @@ class ProcessingPipeline:
         self.translator = Translator()
         self.summarizer = Summarizer()
         self.storage = ResultStorage()
+        self.storage.cleanup_staging(settings.download_staging_ttl_hours)
         self.steps = {
             ProcessingStep.DOWNLOAD: DownloadStep(),
             ProcessingStep.STT: TranscribeStep(),

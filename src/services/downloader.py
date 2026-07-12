@@ -22,9 +22,18 @@ class BilibiliDownloader:
         "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
     )
 
-    def __init__(self, output_dir: str = "/tmp/stt_server"):
-        self.output_dir = Path(output_dir)
-        self.output_dir.mkdir(parents=True, exist_ok=True)
+    def __init__(self, output_dir: str | None = None):
+        self.output_dir = Path(output_dir).resolve() if output_dir else None
+
+    def _resolve_output_dir(self, output_dir: str | Path | None = None) -> Path:
+        if output_dir is not None:
+            path = Path(output_dir).resolve()
+        elif self.output_dir is not None:
+            path = self.output_dir
+        else:
+            path = Path(settings.result_dir).resolve() / ".staging" / "downloader"
+        path.mkdir(parents=True, exist_ok=True)
+        return path
 
     def _browser_headers(self) -> list[str]:
         return [
@@ -36,13 +45,14 @@ class BilibiliDownloader:
             "Origin:https://www.bilibili.com",
         ]
 
-    def _write_cookie_file(self) -> Path | None:
+    def _write_cookie_file(self, output_dir: str | Path | None = None) -> Path | None:
         if not settings.bilibili_cookie:
             return None
+        cookie_dir = self._resolve_output_dir(output_dir)
         with tempfile.NamedTemporaryFile(
             "w",
             encoding="utf-8",
-            dir=self.output_dir,
+            dir=cookie_dir,
             prefix="bilibili_cookie_",
             suffix=".txt",
             delete=False,
@@ -210,10 +220,13 @@ class BilibiliDownloader:
     def get_video_info(self, url_or_bv: str) -> dict:
         return self.probe_video(url_or_bv)["video"]
 
-    def download(self, url_or_bv: str, part: int = 1) -> str:
+    def download(
+        self, url_or_bv: str, part: int = 1, output_dir: str | Path | None = None
+    ) -> str:
         video_url = validate_input(url_or_bv)
         video_id = extract_video_id(url_or_bv)
-        output_template = str(self.output_dir / f"{video_id}_P{part}.%(ext)s")
+        active_output_dir = self._resolve_output_dir(output_dir)
+        output_template = str(active_output_dir / f"{video_id}_P{part}.%(ext)s")
 
         cmd = [
             "yt-dlp",
@@ -233,7 +246,7 @@ class BilibiliDownloader:
         else:
             cmd.append("--no-playlist")
 
-        cookie_path = self._write_cookie_file()
+        cookie_path = self._write_cookie_file(active_output_dir)
         if cookie_path:
             cmd.extend(["--cookies", str(cookie_path)])
 
@@ -279,9 +292,9 @@ class BilibiliDownloader:
             # Fallback: find audio files matching pattern
             pattern = f"{video_id}_P{part}*"
             audio_files = sorted(
-                list(self.output_dir.glob(pattern + ".wav"))
-                + list(self.output_dir.glob(pattern + ".mp3"))
-                + list(self.output_dir.glob(pattern + ".m4a")),
+                list(active_output_dir.glob(pattern + ".wav"))
+                + list(active_output_dir.glob(pattern + ".mp3"))
+                + list(active_output_dir.glob(pattern + ".m4a")),
                 key=lambda f: f.stat().st_mtime,
                 reverse=True,
             )

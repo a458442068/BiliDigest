@@ -48,16 +48,16 @@ class DownloadStep:
             )
 
         logger.info(f"阶段: 下载 - {context.url} (分P: {context.part})")
-        audio_path = await context.run_io(
-            context.downloader.download, context.url, context.part
-        )
-        audio_path = await context.run_io(
-            context.storage.save_audio,
-            context.bv_id,
-            context.part,
-            context.total_parts,
-            audio_path,
-        )
+        with context.storage.audio_download_transaction(
+            context.bv_id, context.part, context.total_parts
+        ) as tx:
+            downloaded_path = await context.run_io(
+                context.downloader.download,
+                context.url,
+                context.part,
+                str(tx.work_dir),
+            )
+            audio_path = await context.run_io(tx.commit_audio, downloaded_path)
         return StepResult(
             step=self.step,
             part=context.part,

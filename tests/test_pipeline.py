@@ -31,10 +31,14 @@ class FakeDownloader:
     def get_video_info(self, url: str) -> dict:
         return {"title": "Demo", "uploader": "Tester", "duration": 12}
 
-    def download(self, url: str, part: int = 1) -> str:
+    def download(self, url: str, part: int = 1, output_dir: str | None = None) -> str:
         if self.fail_download:
             raise DownloadError("DOWNLOAD_FAILED", "fake failure")
         self.downloaded_parts.append(part)
+        if output_dir:
+            staged_path = Path(output_dir) / f"part{part}.wav"
+            staged_path.write_bytes(self.audio_path.read_bytes())
+            return str(staged_path)
         return str(self.audio_path)
 
 
@@ -113,6 +117,7 @@ def test_process_persists_done_status(tmp_path):
     assert metadata["parts"][0]["has_transcript"] is True
     assert metadata["parts"][0]["has_translation"] is True
     assert metadata["parts"][0]["has_summary"] is True
+    assert not (tmp_path / "results" / "BV1xx411c7mD" / ".staging").exists()
     assert "BV1xx411c7mD" not in pipeline._progress
     assert pipeline.get_progress("BV1xx411c7mD").status == "done"
 
