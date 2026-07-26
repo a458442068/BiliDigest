@@ -35,13 +35,6 @@ class Settings(BaseSettings):
     forced_aligner_path: str = Field(
         default="Qwen/Qwen3-ForcedAligner-0.6B", description="对齐模型路径"
     )
-    stt_compile: bool = Field(
-        default=False, description="启用torch.compile (对generate()模式无效，勿开启)"
-    )
-    stt_compile_mode: str = Field(
-        default="reduce-overhead",
-        description="torch.compile模式 (default/reduce-overhead/max-autotune)",
-    )
 
 
 settings = Settings()

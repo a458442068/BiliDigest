@@ -1,4 +1,3 @@
-import os
 import time
 from pathlib import Path
 
@@ -63,95 +62,12 @@ class SpeechToText:
                 f"设备: {self._device}, 时间戳: {self._timestamps_enabled}"
             )
 
-            if self._device == "cuda" and settings.stt_compile:
-                self._compile_model()
-            elif self._device != "cuda" and settings.stt_compile:
-                logger.info("torch.compile 仅在CUDA设备上生效, 跳过")
-
         except STTError:
             raise
         except Exception as e:
             if "CUDA out of memory" in str(e):
                 raise STTError("OUT_OF_MEMORY", f"GPU显存不足: {e}")
             raise STTError("MODEL_LOAD_ERROR", f"模型加载失败: {e}")
-
-    def _compile_model(self):
-        import torch
-
-        if "TORCHINDUCTOR_CACHE_DIR" not in os.environ:
-            os.environ["TORCHINDUCTOR_CACHE_DIR"] = "/tmp/torch_compile_cache"
-        cache_dir = os.environ["TORCHINDUCTOR_CACHE_DIR"]
-        os.makedirs(cache_dir, exist_ok=True)
-
-        target = self._resolve_compile_target()
-        if target is None:
-            logger.warning("未找到可编译的nn.Module, 跳过compile")
-            return
-
-        logger.info(
-            f"开始编译模型 (mode={settings.stt_compile_mode}, "
-            f"dynamic=True, cache={cache_dir}, target={type(target).__name__})"
-        )
-
-        try:
-            t0 = time.monotonic()
-            compiled = torch.compile(
-                target,
-                mode=settings.stt_compile_mode,
-                dynamic=True,
-            )
-            compile_elapsed = time.monotonic() - t0
-
-            self._set_compile_target(compiled)
-
-            log_func = logger.info if compile_elapsed < 60 else logger.warning
-            log_func(f"模型编译完成 ({compile_elapsed:.1f}s)")
-
-            if torch.cuda.is_available():
-                mem = torch.cuda.memory_allocated(0) / 1024**3
-                logger.info(f"编译后GPU显存占用: {mem:.2f}GB")
-
-        except Exception as e:
-            logger.error(f"模型编译失败: {e}, 回退到未编译模型")
-
-    def _resolve_compile_target(self):
-        import torch.nn as nn
-
-        if isinstance(self._model, nn.Module):
-            return self._model
-
-        candidates = []
-        for name, attr in vars(self._model).items():
-            if isinstance(attr, nn.Module):
-                candidates.append((name, attr))
-
-        if not candidates:
-            logger.warning(
-                f"Qwen3ASRModel 内部无 nn.Module 属性, "
-                f"可用属性: {[k for k in dir(self._model) if not k.startswith('_')]}"
-            )
-            return None
-
-        logger.info(f"检测到可编译子模块: {[c[0] for c in candidates]}")
-        preferred = ("model", "_model", "decoder", "encoder", "asr_model")
-        for name in preferred:
-            for n, m in candidates:
-                if n == name:
-                    logger.info(f"选择编译子模块: {n} ({type(m).__name__})")
-                    self._compile_attr = n
-                    return m
-
-        name, module = candidates[0]
-        logger.info(f"选择编译子模块: {name} ({type(module).__name__})")
-        self._compile_attr = name
-        return module
-
-    def _set_compile_target(self, compiled):
-        if hasattr(self, "_compile_attr"):
-            setattr(self._model, self._compile_attr, compiled)
-            del self._compile_attr
-        else:
-            self._model = compiled
 
     def transcribe(self, audio_path: str) -> dict:
         backend = settings.stt_backend
