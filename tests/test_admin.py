@@ -126,6 +126,27 @@ def test_admin_detail_shows_part_metadata(monkeypatch, tmp_path):
     assert "12秒" in response.text
 
 
+def test_admin_detail_shows_timestamp_controls(monkeypatch, tmp_path):
+    storage = patch_storage(monkeypatch, tmp_path)
+    bv_id = seed_video(storage)
+    storage.save_segments(
+        bv_id,
+        1,
+        1,
+        [
+            {"text": "hello ", "start": 0.0, "end": 0.4},
+            {"text": "world", "start": 0.4, "end": 1.2},
+        ],
+    )
+
+    response = client.get(f"/admin/video/{bv_id}")
+
+    assert response.status_code == 200
+    assert "时间轴文字稿" in response.text
+    assert 'data-segment-start="0.0"' in response.text
+    assert "setActiveSegment" in response.text
+
+
 def test_admin_detail_shows_auto_polling_for_processing_video(monkeypatch, tmp_path):
     storage = patch_storage(monkeypatch, tmp_path)
     bv_id = seed_video(storage, status="processing")

@@ -1,4 +1,5 @@
 from src.models.domain import ArtifactKind
+from src.utils.subtitle import merge_segments_to_sentences
 
 
 DEFAULT_STATUS_FILTER = "all"
@@ -236,7 +237,14 @@ def _build_part_content(
         "has_transcript": artifacts[ArtifactKind.TRANSCRIPT.value],
         "has_translation": artifacts[ArtifactKind.TRANSLATION.value],
         "has_summary": artifacts[ArtifactKind.SUMMARY.value],
+        "segments": [],
     }
+    try:
+        part_data["segments"] = merge_segments_to_sentences(
+            storage.load_segments(bv_id, part, total_parts)
+        )
+    except (FileNotFoundError, ValueError, KeyError, TypeError):
+        part_data["segments"] = []
     try:
         part_data["transcript"] = storage.load_artifact(
             bv_id, part, total_parts, ArtifactKind.TRANSCRIPT

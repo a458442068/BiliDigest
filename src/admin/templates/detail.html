@@ -119,10 +119,23 @@
                     <div class="rounded-lg bg-gray-100 p-6 text-sm text-gray-500 dark:bg-gray-900 dark:text-gray-400">当前来源没有可嵌入播放器。</div>
                     {% endif %}
                     <div class="mt-4">
-                        <audio controls class="w-full" preload="none">
+                        <audio id="audio-{{ content.part }}" data-part-audio="{{ content.part }}" controls class="w-full" preload="none">
                             <source src="/results/{{ bv_id }}/{% if total_parts > 1 %}P{{ content.part }}_{% endif %}audio.wav" type="audio/wav">
                             您的浏览器不支持音频播放
                         </audio>
+                        {% if content.segments %}
+                        <div class="mt-4 rounded-lg border border-indigo-100 bg-indigo-50/50 p-3 dark:border-indigo-900 dark:bg-indigo-950/40">
+                            <div class="mb-2 flex items-center justify-between">
+                                <span class="text-xs font-semibold text-indigo-900 dark:text-indigo-100">时间轴文字稿</span>
+                                <span class="text-xs text-indigo-700 dark:text-indigo-300">点击句子跳转</span>
+                            </div>
+                            <div data-segment-list="{{ content.part }}" class="max-h-64 space-y-1 overflow-y-auto">
+                                {% for segment in content.segments %}
+                                <button type="button" data-segment-start="{{ segment.start }}" data-segment-end="{{ segment.end }}" class="segment-button block w-full rounded px-2 py-1 text-left text-xs leading-5 text-gray-700 hover:bg-indigo-100 dark:text-gray-200 dark:hover:bg-indigo-900" data-part="{{ content.part }}">{{ segment.text }}</button>
+                                {% endfor %}
+                            </div>
+                        </div>
+                        {% endif %}
                         <div class="mt-3 flex flex-wrap gap-2 text-xs">
                             <a href="/api/v1/export/{{ bv_id }}/srt?part={{ content.part }}" class="rounded-md border border-gray-300 px-2.5 py-1.5 font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700">SRT</a>
                             <a href="/api/v1/export/{{ bv_id }}/vtt?part={{ content.part }}" class="rounded-md border border-gray-300 px-2.5 py-1.5 font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700">VTT</a>
@@ -300,6 +313,29 @@
         document.querySelectorAll('[data-markdown]').forEach(renderMarkdownElement);
     }
     renderAllMarkdown();
+
+    function setActiveSegment(part, currentTime) {
+        document.querySelectorAll(`[data-segment-list="${part}"] .segment-button`).forEach((button) => {
+            const start = Number(button.dataset.segmentStart);
+            const end = Number(button.dataset.segmentEnd);
+            const active = currentTime >= start && currentTime < end;
+            button.classList.toggle('bg-indigo-200', active);
+            button.classList.toggle('font-semibold', active);
+            button.classList.toggle('dark:bg-indigo-800', active);
+        });
+    }
+
+    document.querySelectorAll('[data-part-audio]').forEach((audio) => {
+        const part = audio.dataset.partAudio;
+        audio.addEventListener('timeupdate', () => setActiveSegment(part, audio.currentTime));
+        document.querySelectorAll(`[data-segment-list="${part}"] .segment-button`).forEach((button) => {
+            button.addEventListener('click', () => {
+                audio.currentTime = Number(button.dataset.segmentStart) || 0;
+                audio.play().catch(() => {});
+                setActiveSegment(part, audio.currentTime);
+            });
+        });
+    });
 
     document.querySelectorAll('[data-toggle-markdown]').forEach((btn) => {
         btn.addEventListener('click', () => {
