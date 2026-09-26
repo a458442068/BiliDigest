@@ -82,6 +82,23 @@ curl http://localhost:8000/api/v1/export/BV1xx411c7mD/srt -o subtitle.srt
 
 健康检查。
 
+### 异步任务接口
+
+浏览器脚本和长视频建议使用异步任务接口，避免长时间占用浏览器请求：
+
+```bash
+curl -X POST http://localhost:8000/api/v1/jobs \
+  -H "Content-Type: application/json" \
+  -d '{"url":"BV1xx411c7mD","options":{"translate":true,"summarize":true,"target_parts":[1]}}'
+
+curl http://localhost:8000/api/v1/jobs/{job_id}
+curl http://localhost:8000/api/v1/jobs/{job_id}/result
+```
+
+### 浏览器脚本
+
+`userscript/bilibili-ai-processor.user.js` 可安装到 Tampermonkey。脚本支持当前页面 BV 号、当前 P/全部 P、异步进度查询和结果展示。首次使用时在面板中设置本地服务地址，默认是 `http://localhost:8000`。
+
 ## Web 管理界面
 
 访问 `http://localhost:8000/admin/` 查看已处理视频列表、详情、搜索、删除和重新处理。

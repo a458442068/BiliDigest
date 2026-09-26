@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         B站视频AI处理器
 // @namespace    http://tampermonkey.net/
-// @version      1.0
+// @version      2.0
 // @description  向本地AI服务发送B站视频处理请求
 // @author       You
 // @match        *://*.bilibili.com/video/*
@@ -17,14 +17,18 @@
 
     // ==================== 常量定义 ====================
     const DEFAULT_CONFIG = {
-        serverUrl: 'http://192.168.31.173:8000',
+        serverUrl: 'http://localhost:8000',
         translate: true,
         summarize: true,
         force: false,
-        showResult: true
+        showResult: true,
+        partMode: 'current'
     };
 
     const STORAGE_KEY = 'aiProcessorConfig';
+    let currentConfig = loadConfig();
+    let currentBv = null;
+    let currentJobId = null;
 
     // ==================== 配置管理 ====================
     function loadConfig() {
@@ -41,6 +45,19 @@
         const url = window.location.href;
         const match = url.match(/BV[0-9A-Za-z]+/);
         return match ? match[0] : null;
+    }
+
+    function extractCurrentPart() {
+        const part = Number(new URL(window.location.href).searchParams.get('p'));
+        return Number.isInteger(part) && part > 0 ? part : 1;
+    }
+
+    function updateVideoInfo() {
+        currentBv = extractBV();
+        const bvElement = document.querySelector('#ai-video-bv');
+        const partElement = document.querySelector('#ai-video-part');
+        if (bvElement) bvElement.textContent = currentBv || '未检测到视频ID';
+        if (partElement) partElement.textContent = `P${extractCurrentPart()}`;
     }
 
     // ==================== 样式注入 ====================
@@ -135,6 +152,15 @@
                 font-size: 14px;
                 box-sizing: border-box;
                 transition: border-color 0.2s;
+            }
+            .ai-form-group select {
+                width: 100%;
+                padding: 10px 12px;
+                border: 1px solid #ddd;
+                border-radius: 8px;
+                font-size: 14px;
+                box-sizing: border-box;
+                background: #fff;
             }
             .ai-form-group input[type="text"]:focus {
                 outline: none;
@@ -348,8 +374,7 @@
     }
 
     function createPanel() {
-        const config = loadConfig();
-        const bv = extractBV();
+        const config = currentConfig;
 
         const panel = document.createElement('div');
         panel.id = 'ai-panel';
@@ -361,7 +386,14 @@
             <div id="ai-panel-body">
                 <div class="ai-form-group">
                     <label>服务器地址:</label>
-                    <input type="text" id="ai-server-url" value="${config.serverUrl}" placeholder="http://192.168.31.173:8000">
+                    <input type="text" id="ai-server-url" placeholder="http://localhost:8000">
+                </div>
+                <div class="ai-form-group">
+                    <label>处理范围:</label>
+                    <select id="ai-part-mode">
+                        <option value="current">当前 P</option>
+                        <option value="all">全部 P</option>
+                    </select>
                 </div>
                 <div class="ai-form-group">
                     <label>选项:</label>
@@ -386,7 +418,7 @@
                 </div>
                 <div class="ai-form-group">
                     <div class="ai-video-info">
-                        当前视频: <span>${bv || '未检测到视频ID'}</span>
+                        当前视频: <span id="ai-video-bv"></span> · <span id="ai-video-part"></span>
                     </div>
                 </div>
                 <button id="ai-process-btn">开始处理</button>
@@ -394,6 +426,9 @@
         `;
 
         document.body.appendChild(panel);
+        document.getElementById('ai-server-url').value = config.serverUrl;
+        document.getElementById('ai-part-mode').value = config.partMode || 'current';
+        updateVideoInfo();
 
         // 事件绑定
         document.getElementById('ai-panel-close').addEventListener('click', (e) => {
@@ -511,6 +546,7 @@
         }
         panel.classList.add('visible');
         document.getElementById('ai-result-loading').style.display = 'block';
+        updateLoadingText('任务已提交，等待处理...');
         document.getElementById('ai-result-content').innerHTML = '';
     }
 
@@ -547,11 +583,17 @@
             translate: document.getElementById('ai-translate').checked,
             summarize: document.getElementById('ai-summarize').checked,
             force: document.getElementById('ai-force').checked,
-            showResult: document.getElementById('ai-show-result').checked
+            showResult: document.getElementById('ai-show-result').checked,
+            partMode: document.getElementById('ai-part-mode').value
         };
 
         // 保存配置
+        currentConfig = config;
         saveConfig(config);
+
+        const processButton = document.getElementById('ai-process-btn');
+        processButton.disabled = true;
+        processButton.textContent = '已提交，处理中...';
 
         // 关闭配置面板
         const panel = document.getElementById('ai-panel');
@@ -574,19 +616,20 @@
             options: {
                 translate: config.translate,
                 summarize: config.summarize,
-                force: config.force
+                force: config.force,
+                target_parts: config.partMode === 'current' ? [extractCurrentPart()] : null
             }
         };
 
         GM_xmlhttpRequest({
             method: 'POST',
-            url: `${config.serverUrl}/api/v1/process`,
+            url: `${config.serverUrl.replace(/\/$/, '')}/api/v1/jobs`,
             headers: {
                 'Content-Type': 'application/json'
             },
             data: JSON.stringify(requestData),
             onload: function (response) {
-                handleResponse(response, config);
+                handleJobSubmission(response, config);
             },
             onerror: function (error) {
                 handleError(error, config);
@@ -595,6 +638,111 @@
                 handleError({ message: '请求超时' }, config);
             }
         });
+    }
+
+    function handleJobSubmission(response, config) {
+        if (response.status < 200 || response.status >= 300) {
+            handleErrorResponse(response, config);
+            return;
+        }
+        try {
+            const job = JSON.parse(response.responseText);
+            currentJobId = job.job_id;
+            updateLoadingText('任务已提交，等待处理...');
+            pollJob(job.job_id, config, 0);
+        } catch (error) {
+            handleError({ message: '任务响应格式错误' }, config);
+        }
+    }
+
+    function pollJob(jobId, config, attempt) {
+        if (attempt > 180) {
+            handleError({ message: '任务等待超时，请到管理页面查看' }, config);
+            return;
+        }
+        GM_xmlhttpRequest({
+            method: 'GET',
+            url: `${config.serverUrl.replace(/\/$/, '')}/api/v1/jobs/${encodeURIComponent(jobId)}`,
+            onload: function (response) {
+                if (response.status < 200 || response.status >= 300) {
+                    handleErrorResponse(response, config);
+                    return;
+                }
+                try {
+                    const data = JSON.parse(response.responseText);
+                    updateLoadingText(`${formatJobStatus(data)} ${Math.round((data.step_progress || 0) * 100)}%`);
+                    if (data.status === 'done') {
+                        fetchJobResult(jobId, config);
+                    } else if (data.status === 'error') {
+                        handleError({ message: data.error || '处理失败' }, config);
+                    } else {
+                        window.setTimeout(() => pollJob(jobId, config, attempt + 1), 2000);
+                    }
+                } catch (error) {
+                    handleError({ message: '任务状态格式错误' }, config);
+                }
+            },
+            onerror: function () {
+                window.setTimeout(() => pollJob(jobId, config, attempt + 1), 3000);
+            }
+        });
+    }
+
+    function fetchJobResult(jobId, config) {
+        GM_xmlhttpRequest({
+            method: 'GET',
+            url: `${config.serverUrl.replace(/\/$/, '')}/api/v1/jobs/${encodeURIComponent(jobId)}/result`,
+            onload: function (response) {
+                if (response.status < 200 || response.status >= 300) {
+                    handleErrorResponse(response, config);
+                    return;
+                }
+                try {
+                    const data = JSON.parse(response.responseText);
+                    finishRequest(config);
+                    if (config.showResult) displayResult(data);
+                    else showNotification('处理成功', 'success');
+                } catch (error) {
+                    handleError({ message: '结果格式错误' }, config);
+                }
+            },
+            onerror: function (error) {
+                handleError(error, config);
+            }
+        });
+    }
+
+    function updateLoadingText(text) {
+        const loading = document.querySelector('#ai-result-loading p');
+        if (loading) loading.textContent = text;
+    }
+
+    function formatJobStatus(data) {
+        const labels = {
+            queued: '排队中', downloading: '下载中', stt: '语音识别中',
+            translating: '翻译中', summarizing: '摘要生成中', done: '已完成'
+        };
+        return labels[data.current_step] || labels[data.status] || data.current_step || '处理中';
+    }
+
+    function finishRequest(config) {
+        const btn = document.getElementById('ai-process-btn');
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = '开始处理';
+        }
+        currentJobId = null;
+    }
+
+    function handleErrorResponse(response, config) {
+        let message = `请求失败: HTTP ${response.status}`;
+        try {
+            const body = JSON.parse(response.responseText);
+            message = body.detail?.error?.message || body.detail?.message || body.detail || message;
+        } catch (error) {
+            // Keep the HTTP status when the server does not return JSON.
+        }
+        handleError({ message }, config);
     }
 
     function handleResponse(response, config) {
@@ -674,6 +822,15 @@
             `;
         }
 
+        if (Array.isArray(data.parts) && data.parts.length > 1) {
+            html += `
+                <div class="ai-result-section">
+                    <h4>分 P</h4>
+                    <div class="ai-result-content">共 ${data.parts.length} 个分 P，完整内容请打开本地管理页面查看。</div>
+                </div>
+            `;
+        }
+
         // 如果都没有，显示整个响应
         if (!html) {
             html = `
@@ -717,8 +874,19 @@
 
     // ==================== 初始化 ====================
     function init() {
+        if (window.__biliAiProcessorInitialized) return;
+        window.__biliAiProcessorInitialized = true;
         injectStyles();
         createFloatingButton();
+        updateVideoInfo();
+
+        let lastUrl = window.location.href;
+        window.setInterval(() => {
+            if (window.location.href !== lastUrl) {
+                lastUrl = window.location.href;
+                updateVideoInfo();
+            }
+        }, 1000);
 
         // 点击其他区域关闭面板
         document.addEventListener('click', (e) => {
