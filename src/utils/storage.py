@@ -1,4 +1,5 @@
 import json
+import os
 import re
 import shutil
 import time
@@ -152,12 +153,24 @@ class ResultStorage:
             logger.info(f"已保存音频: {path}")
             return str(path)
         if kind == ArtifactKind.SEGMENTS:
-            path.write_text(json.dumps(content, ensure_ascii=False), encoding="utf-8")
+            self._atomic_write_text(
+                path, json.dumps(content, ensure_ascii=False)
+            )
             logger.info(f"已保存时间戳: {path}")
             return path
-        path.write_text(str(content), encoding="utf-8")
+        self._atomic_write_text(path, str(content))
         logger.info(f"已保存产物 {kind.value}: {path}")
         return path
+
+    @staticmethod
+    def _atomic_write_text(path: Path, content: str):
+        tmp_path = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
+        try:
+            tmp_path.write_text(content, encoding="utf-8")
+            os.replace(tmp_path, path)
+        finally:
+            if tmp_path.exists():
+                tmp_path.unlink()
 
     def delete_artifacts(
         self,
@@ -341,8 +354,8 @@ class ResultStorage:
 
     def save_metadata(self, bv_id: str, metadata: dict):
         path = self.get_dir(bv_id) / "metadata.json"
-        path.write_text(
-            json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8"
+        self._atomic_write_text(
+            path, json.dumps(metadata, ensure_ascii=False, indent=2)
         )
         logger.info(f"已更新metadata: {path}")
 

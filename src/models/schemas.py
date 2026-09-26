@@ -8,6 +8,9 @@ class ProcessOptions(BaseModel):
     from_step: str | None = Field(
         default=None, description="从指定步骤开始重跑 (stt/translation/summary)"
     )
+    target_parts: list[int] | None = Field(
+        default=None, min_length=1, description="只处理指定分P"
+    )
 
 
 class ProcessRequest(BaseModel):
@@ -36,6 +39,27 @@ class ProcessResult(BaseModel):
     summary: str | None = None
     result_dir: str | None = None
     cached_steps: list[str] = Field(default_factory=list)
+    parts: list[dict] = Field(default_factory=list)
+
+
+class JobSubmitResponse(BaseModel):
+    job_id: str
+    bv_id: str
+    status: str = "queued"
+
+
+class JobStatusResponse(BaseModel):
+    job_id: str
+    bv_id: str
+    status: str = Field(description="queued | processing | done | error")
+    current_step: str = Field(
+        description="queued | downloading | stt | translating | summarizing | done"
+    )
+    step_progress: float = Field(default=0.0, description="当前步骤进度 0.0~1.0")
+    total_parts: int = 1
+    current_part: int = 1
+    error: str | None = None
+    result_available: bool = False
 
 
 class ProgressInfo(BaseModel):

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, status
 from fastapi.responses import JSONResponse, PlainTextResponse
 from loguru import logger
 
@@ -8,14 +8,18 @@ from src.models.schemas import (
     ErrorResponse,
     ErrorDetail,
     ProgressInfo,
+    JobSubmitResponse,
+    JobStatusResponse,
 )
 from src.exceptions import ProcessError, DownloadError
 from src.models.domain import ProcessingRequest
 from src.services.pipeline import ProcessingPipeline
+from src.services.jobs import JobManager
 from src.utils.export import ExportError, ExportService
 
 router = APIRouter(prefix="/api/v1")
 pipeline = ProcessingPipeline()
+job_manager = JobManager(pipeline)
 export_service = ExportService()
 
 
@@ -35,6 +39,9 @@ async def process_video(request: ProcessRequest):
                 summarize=request.options.summarize,
                 force=request.options.force,
                 from_step=request.options.from_step,
+                target_parts=set(request.options.target_parts)
+                if request.options.target_parts is not None
+                else None,
             )
         )
         return ProcessResult(**result)
@@ -69,6 +76,58 @@ async def process_video(request: ProcessRequest):
 @router.get("/health")
 async def health_check():
     return {"status": "ok", "service": "bili-digest"}
+
+
+@router.post("/jobs", response_model=JobSubmitResponse, status_code=status.HTTP_202_ACCEPTED)
+async def submit_job(request: ProcessRequest):
+    try:
+        job = await job_manager.submit(
+            ProcessingRequest(
+                url=request.url,
+                translate=request.options.translate,
+                summarize=request.options.summarize,
+                force=request.options.force,
+                from_step=request.options.from_step,
+                target_parts=set(request.options.target_parts)
+                if request.options.target_parts is not None
+                else None,
+            )
+        )
+    except (DownloadError, ProcessError, ValueError) as exc:
+        message = getattr(exc, "message", str(exc))
+        raise HTTPException(status_code=400, detail=message) from exc
+    return JobSubmitResponse(job_id=job.job_id, bv_id=job.bv_id, status=job.status)
+
+
+@router.get("/jobs/{job_id}", response_model=JobStatusResponse)
+async def get_job(job_id: str):
+    job = job_manager.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    progress = job_manager.progress(job)
+    if isinstance(progress, ProgressInfo):
+        progress_data = progress.model_dump()
+    else:
+        progress_data = progress
+    progress_data.pop("bv_id", None)
+    return JobStatusResponse(
+        job_id=job.job_id,
+        bv_id=job.bv_id,
+        **progress_data,
+        result_available=job.status == "done" and job.result is not None,
+    )
+
+
+@router.get("/jobs/{job_id}/result", response_model=ProcessResult)
+async def get_job_result(job_id: str):
+    job = job_manager.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    if job.status in {"queued", "processing"}:
+        raise HTTPException(status_code=409, detail="任务尚未完成")
+    if job.status == "error":
+        raise HTTPException(status_code=422, detail=job.error or "处理失败")
+    return ProcessResult(**(job.result or {}))
 
 
 @router.get("/status/{bv_id}", response_model=ProgressInfo)
