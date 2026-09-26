@@ -102,6 +102,7 @@ class ResultStorage:
             ArtifactKind.TRANSLATION: "translation.txt",
             ArtifactKind.SUMMARY: "summary.txt",
             ArtifactKind.TRANSCRIPT_CLEAN: "transcript_clean.txt",
+            ArtifactKind.INSIGHTS: "insights.json",
         }
         return (
             self.get_dir(bv_id)
@@ -128,6 +129,8 @@ class ResultStorage:
         path = self.artifact_path(bv_id, part, total_parts, kind)
         if kind == ArtifactKind.SEGMENTS:
             return json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
+        if kind == ArtifactKind.INSIGHTS:
+            return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
         if kind == ArtifactKind.AUDIO:
             return str(path)
         return path.read_text(encoding="utf-8")
@@ -152,11 +155,11 @@ class ResultStorage:
                     tmp_path.unlink()
             logger.info(f"已保存音频: {path}")
             return str(path)
-        if kind == ArtifactKind.SEGMENTS:
+        if kind in (ArtifactKind.SEGMENTS, ArtifactKind.INSIGHTS):
             self._atomic_write_text(
                 path, json.dumps(content, ensure_ascii=False)
             )
-            logger.info(f"已保存时间戳: {path}")
+            logger.info(f"已保存结构化产物: {path}")
             return path
         self._atomic_write_text(path, str(content))
         logger.info(f"已保存产物 {kind.value}: {path}")
@@ -188,6 +191,7 @@ class ResultStorage:
                 ArtifactKind.TRANSLATION,
                 ArtifactKind.SUMMARY,
                 ArtifactKind.TRANSCRIPT_CLEAN,
+                ArtifactKind.INSIGHTS,
             ],
             ProcessingStep.STT: [
                 ArtifactKind.SEGMENTS,
@@ -195,15 +199,18 @@ class ResultStorage:
                 ArtifactKind.TRANSLATION,
                 ArtifactKind.SUMMARY,
                 ArtifactKind.TRANSCRIPT_CLEAN,
+                ArtifactKind.INSIGHTS,
             ],
             ProcessingStep.TRANSLATION: [
                 ArtifactKind.TRANSLATION,
                 ArtifactKind.SUMMARY,
                 ArtifactKind.TRANSCRIPT_CLEAN,
+                ArtifactKind.INSIGHTS,
             ],
             ProcessingStep.SUMMARY: [
                 ArtifactKind.SUMMARY,
                 ArtifactKind.TRANSCRIPT_CLEAN,
+                ArtifactKind.INSIGHTS,
             ],
         }
         deleted = []
@@ -318,6 +325,19 @@ class ResultStorage:
                     ArtifactKind.SUMMARY,
                     summary_data["summary"],
                 )
+            if summary_data.get("key_points") is not None:
+                self.save_artifact(
+                    bv_id,
+                    part,
+                    total_parts,
+                    ArtifactKind.INSIGHTS,
+                    {
+                        "key_points": summary_data.get("key_points", []),
+                        "chapters": summary_data.get("chapters", []),
+                        "action_items": summary_data.get("action_items", []),
+                        "entities": summary_data.get("entities", []),
+                    },
+                )
         else:
             self.save_artifact(
                 bv_id, part, total_parts, ArtifactKind.SUMMARY, summary_data
@@ -341,7 +361,20 @@ class ResultStorage:
             result["transcript_clean"] = clean_path.read_text(encoding="utf-8")
         if summary_path.exists():
             result["summary"] = summary_path.read_text(encoding="utf-8")
+        insights = self.load_insights(bv_id, part, total_parts)
+        result.update(insights)
         return result if result else ""
+
+    def load_insights(self, bv_id: str, part: int, total_parts: int) -> dict:
+        path = self.artifact_path(bv_id, part, total_parts, ArtifactKind.INSIGHTS)
+        if not path.exists():
+            return {}
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            logger.warning(f"忽略损坏的结构化摘要: {path}")
+            return {}
+        return value if isinstance(value, dict) else {}
 
     def load_metadata(self, bv_id: str) -> dict:
         path = self.get_dir(bv_id) / "metadata.json"

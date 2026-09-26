@@ -22,7 +22,8 @@
         summarize: true,
         force: false,
         showResult: true,
-        partMode: 'current'
+        partMode: 'current',
+        summaryTemplate: 'general'
     };
 
     const STORAGE_KEY = 'aiProcessorConfig';
@@ -396,6 +397,15 @@
                     </select>
                 </div>
                 <div class="ai-form-group">
+                    <label>摘要模板:</label>
+                    <select id="ai-summary-template">
+                        <option value="general">通用摘要</option>
+                        <option value="notes">知识笔记</option>
+                        <option value="meeting">会议纪要</option>
+                        <option value="study">学习复习</option>
+                    </select>
+                </div>
+                <div class="ai-form-group">
                     <label>选项:</label>
                     <div class="ai-checkbox-group">
                         <label class="ai-checkbox-item">
@@ -428,6 +438,7 @@
         document.body.appendChild(panel);
         document.getElementById('ai-server-url').value = config.serverUrl;
         document.getElementById('ai-part-mode').value = config.partMode || 'current';
+        document.getElementById('ai-summary-template').value = config.summaryTemplate || 'general';
         updateVideoInfo();
 
         // 事件绑定
@@ -584,7 +595,8 @@
             summarize: document.getElementById('ai-summarize').checked,
             force: document.getElementById('ai-force').checked,
             showResult: document.getElementById('ai-show-result').checked,
-            partMode: document.getElementById('ai-part-mode').value
+            partMode: document.getElementById('ai-part-mode').value,
+            summaryTemplate: document.getElementById('ai-summary-template').value
         };
 
         // 保存配置
@@ -617,7 +629,8 @@
                 translate: config.translate,
                 summarize: config.summarize,
                 force: config.force,
-                target_parts: config.partMode === 'current' ? [extractCurrentPart()] : null
+                target_parts: config.partMode === 'current' ? [extractCurrentPart()] : null,
+                summary_template: config.summaryTemplate
             }
         };
 
@@ -818,6 +831,33 @@
                 <div class="ai-result-section">
                     <h4>摘要</h4>
                     <div class="ai-result-content">${escapeHtml(data.summary)}</div>
+                </div>
+            `;
+        }
+
+        if (Array.isArray(data.key_points) && data.key_points.length) {
+            html += `
+                <div class="ai-result-section">
+                    <h4>关键观点</h4>
+                    <div class="ai-result-content">${escapeHtml(data.key_points.map(item => `• ${item}`).join('\n'))}</div>
+                </div>
+            `;
+        }
+
+        if (Array.isArray(data.action_items) && data.action_items.length) {
+            html += `
+                <div class="ai-result-section">
+                    <h4>行动项</h4>
+                    <div class="ai-result-content">${escapeHtml(data.action_items.map(item => `• ${item}`).join('\n'))}</div>
+                </div>
+            `;
+        }
+
+        if (Array.isArray(data.chapters) && data.chapters.length) {
+            html += `
+                <div class="ai-result-section">
+                    <h4>章节</h4>
+                    <div class="ai-result-content">${escapeHtml(data.chapters.map(item => `${item.title}: ${item.summary || ''}`).join('\n'))}</div>
                 </div>
             `;
         }

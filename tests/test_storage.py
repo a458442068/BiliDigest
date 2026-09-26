@@ -71,6 +71,28 @@ class TestResultStorageSafety:
         assert artifacts["translation"] is False
         assert storage.load_artifact(bv_id, 1, 2, "transcript") == "hello world"
 
+    def test_summary_insights_are_stored_as_json(self, tmp_path):
+        storage = ResultStorage(str(tmp_path))
+        bv_id = "BV1xx411c7mD"
+        storage.save_summary(
+            bv_id,
+            1,
+            1,
+            {
+                "transcript_clean": "clean",
+                "summary": "summary",
+                "key_points": ["point"],
+                "chapters": [{"title": "开场", "summary": "介绍"}],
+                "action_items": ["复习"],
+                "entities": [{"name": "BiliDigest", "type": "项目"}],
+            },
+        )
+
+        insights = storage.load_insights(bv_id, 1, 1)
+
+        assert insights["key_points"] == ["point"]
+        assert insights["chapters"][0]["title"] == "开场"
+
     def test_audio_download_transaction_moves_audio_to_final_path(self, tmp_path):
         storage = ResultStorage(str(tmp_path))
         bv_id = "BV1xx411c7mD"

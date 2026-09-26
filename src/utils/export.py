@@ -81,6 +81,9 @@ class ExportService:
             "translation": read_or_none(ArtifactKind.TRANSLATION),
             "transcript_clean": read_or_none(ArtifactKind.TRANSCRIPT_CLEAN),
             "summary": read_or_none(ArtifactKind.SUMMARY),
+            "insights": self.storage.load_insights(
+                context.bv_id, context.part, context.total_parts
+            ),
         }
 
     def srt(self, bv_id: str, part: int) -> str:
@@ -137,6 +140,11 @@ class ExportService:
             ("整理版", texts.get("transcript_clean")),
             ("摘要", texts.get("summary")),
         ]
+        insights = texts.get("insights") or {}
+        if insights.get("key_points"):
+            sections.append(("关键观点", "\n".join(f"- {item}" for item in insights["key_points"])))
+        if insights.get("action_items"):
+            sections.append(("行动项", "\n".join(f"- {item}" for item in insights["action_items"])))
         content = "\n\n".join(
             f"【{title}】\n{body}" for title, body in sections if body
         )
@@ -158,6 +166,13 @@ class ExportService:
         ):
             if body:
                 lines.extend(["", f"## {heading}", "", body])
+        insights = texts.get("insights") or {}
+        if insights.get("key_points"):
+            lines.extend(["", "## 关键观点", ""])
+            lines.extend(f"- {point}" for point in insights["key_points"])
+        if insights.get("action_items"):
+            lines.extend(["", "## 行动项", ""])
+            lines.extend(f"- {item}" for item in insights["action_items"])
         content = "\n".join(lines).strip()
         if not content:
             raise ExportNotFound("无可导出内容")

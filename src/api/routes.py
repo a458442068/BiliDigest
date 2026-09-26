@@ -42,6 +42,7 @@ async def process_video(request: ProcessRequest):
                 target_parts=set(request.options.target_parts)
                 if request.options.target_parts is not None
                 else None,
+                summary_template=request.options.summary_template,
             )
         )
         return ProcessResult(**result)
@@ -91,6 +92,7 @@ async def submit_job(request: ProcessRequest):
                 target_parts=set(request.options.target_parts)
                 if request.options.target_parts is not None
                 else None,
+                summary_template=request.options.summary_template,
             )
         )
     except (DownloadError, ProcessError, ValueError) as exc:

@@ -19,6 +19,7 @@ class StepContext:
     stt: Any
     translator: Any
     summarizer: Any
+    summary_template: str
     run_io: Callable[..., Awaitable[Any]]
     run_stt: Callable[..., Awaitable[Any]]
 
@@ -225,7 +226,15 @@ class SummarizeStep:
                         context.part,
                         context.total_parts,
                     )
-                summary_data = await context.summarizer.summarize(summary_input)
+                try:
+                    summary_data = await context.summarizer.summarize(
+                        summary_input, template=context.summary_template
+                    )
+                except TypeError as exc:
+                    # Keep compatibility with lightweight custom summarizers used locally.
+                    if "template" not in str(exc):
+                        raise
+                    summary_data = await context.summarizer.summarize(summary_input)
                 if summary_data:
                     await context.run_io(
                         context.storage.save_summary,
@@ -241,6 +250,11 @@ class SummarizeStep:
         if summary_data and isinstance(summary_data, dict):
             data["transcript_clean"] = summary_data.get("transcript_clean")
             data["summary"] = summary_data.get("summary")
+            data["key_points"] = summary_data.get("key_points", [])
+            data["chapters"] = summary_data.get("chapters", [])
+            data["action_items"] = summary_data.get("action_items", [])
+            data["entities"] = summary_data.get("entities", [])
+            data["summary_template"] = context.summary_template
         else:
             data["summary"] = summary_data
         return StepResult(

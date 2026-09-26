@@ -95,6 +95,8 @@ curl http://localhost:8000/api/v1/jobs/{job_id}
 curl http://localhost:8000/api/v1/jobs/{job_id}/result
 ```
 
+`options.summary_template` 支持 `general`、`notes`、`meeting` 和 `study`。结构化摘要会额外保存关键观点、章节、行动项和实体，并在 JSON/Markdown 导出中提供。
+
 ### 浏览器脚本
 
 `userscript/bilibili-ai-processor.user.js` 可安装到 Tampermonkey。脚本支持当前页面 BV 号、当前 P/全部 P、异步进度查询和结果展示。首次使用时在面板中设置本地服务地址，默认是 `http://localhost:8000`。

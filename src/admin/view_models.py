@@ -238,6 +238,7 @@ def _build_part_content(
         "has_translation": artifacts[ArtifactKind.TRANSLATION.value],
         "has_summary": artifacts[ArtifactKind.SUMMARY.value],
         "segments": [],
+        "insights": {},
     }
     try:
         part_data["segments"] = merge_segments_to_sentences(
@@ -245,6 +246,7 @@ def _build_part_content(
         )
     except (FileNotFoundError, ValueError, KeyError, TypeError):
         part_data["segments"] = []
+    part_data["insights"] = storage.load_insights(bv_id, part, total_parts)
     try:
         part_data["transcript"] = storage.load_artifact(
             bv_id, part, total_parts, ArtifactKind.TRANSCRIPT

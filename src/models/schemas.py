@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -10,6 +12,9 @@ class ProcessOptions(BaseModel):
     )
     target_parts: list[int] | None = Field(
         default=None, min_length=1, description="只处理指定分P"
+    )
+    summary_template: Literal["general", "notes", "meeting", "study"] = Field(
+        default="general", description="摘要模板"
     )
 
 
@@ -40,6 +45,11 @@ class ProcessResult(BaseModel):
     result_dir: str | None = None
     cached_steps: list[str] = Field(default_factory=list)
     parts: list[dict] = Field(default_factory=list)
+    key_points: list[str] = Field(default_factory=list)
+    chapters: list[dict] = Field(default_factory=list)
+    action_items: list[str] = Field(default_factory=list)
+    entities: list[dict] = Field(default_factory=list)
+    summary_template: str = "general"
 
 
 class JobSubmitResponse(BaseModel):

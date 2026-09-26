@@ -231,6 +231,39 @@
                 <div class="p-5">
                     {% if content.summary %}
                     {{ text_panel(content, 'summary', '摘要', content.summary, default_tab == 'summary') }}
+                    {% if content.insights %}
+                    <div data-part-panel="{{ content.part }}" data-tab-panel="summary" class="mt-5 space-y-4 {% if default_tab != 'summary' %}hidden{% endif %}">
+                        {% if content.insights.key_points %}
+                        <div>
+                            <h3 class="mb-2 text-sm font-semibold text-gray-950 dark:text-gray-50">关键观点</h3>
+                            <ul class="list-disc space-y-1 pl-5 text-sm leading-6 text-gray-700 dark:text-gray-300">
+                                {% for point in content.insights.key_points %}<li>{{ point }}</li>{% endfor %}
+                            </ul>
+                        </div>
+                        {% endif %}
+                        {% if content.insights.action_items %}
+                        <div>
+                            <h3 class="mb-2 text-sm font-semibold text-gray-950 dark:text-gray-50">行动项</h3>
+                            <ul class="list-disc space-y-1 pl-5 text-sm leading-6 text-gray-700 dark:text-gray-300">
+                                {% for item in content.insights.action_items %}<li>{{ item }}</li>{% endfor %}
+                            </ul>
+                        </div>
+                        {% endif %}
+                        {% if content.insights.chapters %}
+                        <div>
+                            <h3 class="mb-2 text-sm font-semibold text-gray-950 dark:text-gray-50">章节</h3>
+                            <div class="space-y-2">
+                                {% for chapter in content.insights.chapters %}
+                                <div class="rounded-md bg-gray-50 p-3 text-sm dark:bg-gray-900">
+                                    <div class="font-medium text-gray-900 dark:text-gray-100">{{ chapter.title }}</div>
+                                    {% if chapter.summary %}<div class="mt-1 text-gray-600 dark:text-gray-400">{{ chapter.summary }}</div>{% endif %}
+                                </div>
+                                {% endfor %}
+                            </div>
+                        </div>
+                        {% endif %}
+                    </div>
+                    {% endif %}
                     {% endif %}
                     {{ text_panel(content, 'transcript', '文字稿', content.transcript or '无文字稿', default_tab == 'transcript') }}
                     {% if content.translation %}

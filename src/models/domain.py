@@ -11,6 +11,7 @@ class ArtifactKind(StrEnum):
     TRANSLATION = "translation"
     SUMMARY = "summary"
     TRANSCRIPT_CLEAN = "transcript_clean"
+    INSIGHTS = "insights"
 
 
 class ProcessingState(StrEnum):
@@ -73,6 +74,7 @@ class ProcessingRequest:
     force: bool = False
     translate: bool = False
     summarize: bool = False
+    summary_template: str = "general"
 
     def __post_init__(self):
         if isinstance(self.from_step, str):
