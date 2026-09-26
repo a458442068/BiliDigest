@@ -1,5 +1,8 @@
 import asyncio
 
+import pytest
+
+from src.models.domain import ProcessingRequest
 from src.models.schemas import ProgressInfo
 from src.services.jobs import JobManager
 
@@ -30,7 +33,7 @@ def test_job_manager_deduplicates_active_video():
     async def scenario():
         pipeline = FakePipeline()
         manager = JobManager(pipeline)
-        request = type("Request", (), {"url": "BV1xx411c7mD"})()
+        request = ProcessingRequest(url="BV1xx411c7mD")
 
         first = await manager.submit(request)
         second = await manager.submit(request)
@@ -40,5 +43,18 @@ def test_job_manager_deduplicates_active_video():
         assert pipeline.calls == 1
         assert first.status == "done"
         assert first.result["transcript"] == "hello"
+
+    asyncio.run(scenario())
+
+
+def test_job_manager_rejects_conflicting_active_options():
+    async def scenario():
+        manager = JobManager(FakePipeline())
+        await manager.submit(ProcessingRequest(url="BV1xx411c7mD"))
+
+        with pytest.raises(ValueError, match="已有任务不同"):
+            await manager.submit(
+                ProcessingRequest(url="BV1xx411c7mD", summarize=True)
+            )
 
     asyncio.run(scenario())

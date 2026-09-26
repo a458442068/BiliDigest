@@ -12,6 +12,7 @@ class JobRecord:
     job_id: str
     bv_id: str
     request: ProcessingRequest
+    request_signature: tuple = ()
     status: str = "queued"
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     updated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
@@ -31,22 +32,38 @@ class JobManager:
 
     async def submit(self, request: ProcessingRequest) -> JobRecord:
         video_ref = VideoRef.from_input(request.url)
+        signature = self._signature(request)
         async with self._lock:
             existing_job_id = self.active_by_video.get(video_ref.bv_id)
             if existing_job_id:
                 existing = self.jobs.get(existing_job_id)
                 if existing and existing.status in {"queued", "processing"}:
+                    if existing.request_signature != signature:
+                        raise ValueError("该视频正在处理，当前请求选项与已有任务不同")
                     return existing
 
             job = JobRecord(
                 job_id=uuid4().hex,
                 bv_id=video_ref.bv_id,
                 request=request,
+                request_signature=signature,
             )
             self.jobs[job.job_id] = job
             self.active_by_video[job.bv_id] = job.job_id
             job.task = asyncio.create_task(self._run(job), name=f"process-{job.bv_id}")
             return job
+
+    @staticmethod
+    def _signature(request: ProcessingRequest) -> tuple:
+        return (
+            request.url,
+            tuple(sorted(request.target_parts or set())),
+            request.from_step.value if request.from_step else None,
+            request.force,
+            request.translate,
+            request.summarize,
+            request.summary_template,
+        )
 
     async def _run(self, job: JobRecord):
         job.status = "processing"
