@@ -254,6 +254,22 @@ def test_process_regenerates_summary_when_template_changes(tmp_path):
     assert insights["summary_template"] == "meeting"
 
 
+def test_process_serializes_same_video_requests(tmp_path):
+    pipeline = build_pipeline(tmp_path)
+
+    async def scenario():
+        return await asyncio.gather(
+            pipeline.process("BV1xx411c7mD"),
+            pipeline.process("BV1xx411c7mD"),
+        )
+
+    results = asyncio.run(scenario())
+
+    assert len(results) == 2
+    assert pipeline.downloader.downloaded_parts == [1]
+    assert pipeline.stt.calls == 1
+
+
 def test_refresh_metadata_preserves_existing_when_probe_returns_empty(
     monkeypatch, tmp_path
 ):

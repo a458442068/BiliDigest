@@ -56,6 +56,7 @@ class ProcessingPipeline:
             ProcessingStep.SUMMARY: SummarizeStep(),
         }
         self._progress: dict[str, ProgressInfo] = {}
+        self._video_locks: dict[str, asyncio.Lock] = {}
 
     def get_progress(self, bv_id: str) -> ProgressInfo | None:
         if bv_id in self._progress:
@@ -212,6 +213,12 @@ class ProcessingPipeline:
         )
 
     async def process_request(self, request: ProcessingRequest) -> dict:
+        video_ref = VideoRef.from_input(request.url)
+        video_lock = self._video_locks.setdefault(video_ref.bv_id, asyncio.Lock())
+        async with video_lock:
+            return await self._process_request_locked(request)
+
+    async def _process_request_locked(self, request: ProcessingRequest) -> dict:
         video_ref = VideoRef.from_input(request.url)
         bv_id = video_ref.bv_id
         video_url = video_ref.url
