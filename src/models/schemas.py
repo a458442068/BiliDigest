@@ -69,6 +69,7 @@ class JobStatusResponse(BaseModel):
     total_parts: int = 1
     current_part: int = 1
     error: str | None = None
+    error_detail: ErrorDetail | None = None
     result_available: bool = False
 
 

@@ -116,6 +116,7 @@ async def get_job(job_id: str):
         job_id=job.job_id,
         bv_id=job.bv_id,
         **progress_data,
+        error_detail=job.error_detail,
         result_available=job.status == "done" and job.result is not None,
     )
 
