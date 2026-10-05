@@ -26,18 +26,19 @@ from src.services.processing_steps import (
 from src.utils.bv import PartInfo, get_parts, get_source_name
 from src.utils.storage import ResultStorage
 
-# STT 专用线程池：max_workers=1 保证 GPU 串行，避免显存争抢
+# STT 使用独立的单线程池，避免 GPU 推理占满默认 I/O 线程池。
 _stt_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="stt")
 
 
 def _to_thread(func, *args):
     """将同步函数放到默认线程池执行，不阻塞事件循环。"""
-    return asyncio.get_event_loop().run_in_executor(None, func, *args)
+    return asyncio.to_thread(func, *args)
 
 
 def _to_stt(func, *args):
-    """将 STT 函数放到专用线程池执行，GPU 串行。"""
-    return asyncio.get_event_loop().run_in_executor(_stt_executor, func, *args)
+    """将 STT 函数放到专用线程池执行，保证 GPU 推理串行。"""
+    loop = asyncio.get_running_loop()
+    return loop.run_in_executor(_stt_executor, func, *args)
 
 
 class ProcessingPipeline:
