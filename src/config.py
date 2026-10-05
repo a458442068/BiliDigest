@@ -16,6 +16,10 @@ class Settings(BaseSettings):
     )
     llm_model: str = Field(default="gpt-4o-mini", description="LLM模型名称")
     port: int = Field(default=8000, description="服务端口")
+    cors_origins: str = Field(
+        default="http://localhost:8000,http://127.0.0.1:8000",
+        description="允许跨域来源，逗号分隔",
+    )
     log_level: str = Field(default="info", description="日志级别")
     result_dir: str = Field(default="./results", description="结果保存目录")
     download_staging_ttl_hours: int = Field(

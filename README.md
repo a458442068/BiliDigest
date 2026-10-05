@@ -39,6 +39,7 @@ cp .env.example .env
 | `LLM_MODEL` | LLM 模型名称 | `gpt-4o-mini` |
 | `STT_BACKEND` | STT后端 (default/local/remote) | `default` |
 | `PORT` | 服务端口 | `8000` |
+| `CORS_ORIGINS` | 允许跨域来源（逗号分隔） | `http://localhost:8000,http://127.0.0.1:8000` |
 
 ## 运行
 
