@@ -227,6 +227,30 @@ def test_process_from_summary_uses_existing_text_without_upstream_steps(
     assert pipeline.storage.load_summary(bv_id, 1, 1)["summary"] == "summary"
 
 
+def test_process_regenerates_summary_when_template_changes(tmp_path):
+    pipeline = build_pipeline(tmp_path)
+    bv_id = "BV1xx411c7mD"
+
+    asyncio.run(
+        pipeline.process(
+            bv_id,
+            summarize=True,
+            summary_template="general",
+        )
+    )
+    asyncio.run(
+        pipeline.process(
+            bv_id,
+            summarize=True,
+            summary_template="meeting",
+        )
+    )
+
+    assert pipeline.summarizer.calls == 2
+    insights = pipeline.storage.load_insights(bv_id, 1, 1)
+    assert insights["summary_template"] == "meeting"
+
+
 def test_refresh_metadata_preserves_existing_when_probe_returns_empty(
     monkeypatch, tmp_path
 ):

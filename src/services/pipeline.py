@@ -197,6 +197,7 @@ class ProcessingPipeline:
         force: bool = False,
         target_parts: set[int] | None = None,
         from_step: str | None = None,
+        summary_template: str = "general",
     ) -> dict:
         return await self.process_request(
             ProcessingRequest(
@@ -206,6 +207,7 @@ class ProcessingPipeline:
                 force=force,
                 target_parts=target_parts,
                 from_step=from_step,
+                summary_template=summary_template,
             )
         )
 

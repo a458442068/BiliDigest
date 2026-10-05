@@ -193,9 +193,17 @@ class SummarizeStep:
 
     async def run(self, context: StepContext, result: dict) -> StepResult:
         cache_name = f"{context.prefix}summary"
-        cached = not context.force and context.storage.has_summary(
+        cached = False
+        if not context.force and context.storage.has_summary(
             context.bv_id, context.part, context.total_parts
-        )
+        ):
+            insights = await context.run_io(
+                context.storage.load_insights,
+                context.bv_id,
+                context.part,
+                context.total_parts,
+            )
+            cached = insights.get("summary_template") == context.summary_template
         if cached:
             summary_data = await context.run_io(
                 context.storage.load_summary,
@@ -236,6 +244,11 @@ class SummarizeStep:
                         raise
                     summary_data = await context.summarizer.summarize(summary_input)
                 if summary_data:
+                    if isinstance(summary_data, dict):
+                        summary_data = {
+                            **summary_data,
+                            "summary_template": context.summary_template,
+                        }
                     await context.run_io(
                         context.storage.save_summary,
                         context.bv_id,

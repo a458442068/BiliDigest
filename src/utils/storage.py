@@ -325,7 +325,10 @@ class ResultStorage:
                     ArtifactKind.SUMMARY,
                     summary_data["summary"],
                 )
-            if summary_data.get("key_points") is not None:
+            if (
+                summary_data.get("key_points") is not None
+                or summary_data.get("summary_template") is not None
+            ):
                 self.save_artifact(
                     bv_id,
                     part,
@@ -336,6 +339,7 @@ class ResultStorage:
                         "chapters": summary_data.get("chapters", []),
                         "action_items": summary_data.get("action_items", []),
                         "entities": summary_data.get("entities", []),
+                        "summary_template": summary_data.get("summary_template"),
                     },
                 )
         else:
