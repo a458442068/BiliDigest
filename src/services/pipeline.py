@@ -444,6 +444,25 @@ class ProcessingPipeline:
             run_io=_to_thread,
             run_stt=_to_stt,
         )
+        if steps and steps[0] in {
+            ProcessingStep.TRANSLATION,
+            ProcessingStep.SUMMARY,
+        }:
+            metadata = await _to_thread(self.storage.load_metadata, bv_id)
+            part_meta = next(
+                (item for item in metadata.get("parts", []) if item.get("part") == part),
+                {},
+            )
+            if self.storage.has_transcript(bv_id, part, total_parts):
+                result["transcript"] = await _to_thread(
+                    self.storage.load_transcript, bv_id, part, total_parts
+                )
+            result["language"] = part_meta.get("language") or "en"
+            result["duration_seconds"] = part_meta.get("duration_seconds")
+            if self.storage.has_translation(bv_id, part, total_parts):
+                result["translation"] = await _to_thread(
+                    self.storage.load_translation, bv_id, part, total_parts
+                )
         if ProcessingStep.DOWNLOAD not in steps and self.storage.has_audio(
             bv_id, part, total_parts
         ):

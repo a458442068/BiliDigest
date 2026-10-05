@@ -210,7 +210,7 @@ def test_process_from_summary_uses_existing_text_without_upstream_steps(
         lambda url: [PartInfo(part=1, title="P1", duration=12)],
     )
 
-    asyncio.run(
+    result = asyncio.run(
         pipeline.process(
             f"https://www.bilibili.com/video/{bv_id}",
             translate=True,
@@ -224,6 +224,9 @@ def test_process_from_summary_uses_existing_text_without_upstream_steps(
     assert pipeline.stt.calls == 0
     assert pipeline.translator.calls == 0
     assert pipeline.summarizer.calls == 1
+    assert result["transcript"] == "hello world"
+    assert result["language"] == "en"
+    assert result["translation"] == "你好世界"
     assert pipeline.storage.load_summary(bv_id, 1, 1)["summary"] == "summary"
 
 
