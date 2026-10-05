@@ -21,8 +21,18 @@ def test_export_service_generates_txt_md_json(tmp_path):
         1,
         {"transcript_clean": "clean transcript", "summary": "short summary"},
     )
+    storage.save_summary(
+        bv_id,
+        1,
+        1,
+        {"summary": "short summary", "key_points": ["point"],
+         "chapters": [{"title": "intro", "summary": "opening"}],
+         "entities": [{"name": "BiliDigest", "type": "project"}]},
+    )
     service = ExportService(storage)
 
     assert "【文字稿】\nhello world" in service.txt(bv_id, 1)
     assert "# Demo" in service.md(bv_id, 1)
     assert service.json(bv_id, 1)["summary"] == "short summary"
+    assert "## 章节" in service.md(bv_id, 1)
+    assert "BiliDigest" in service.txt(bv_id, 1)

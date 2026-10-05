@@ -145,6 +145,16 @@ class ExportService:
             sections.append(("关键观点", "\n".join(f"- {item}" for item in insights["key_points"])))
         if insights.get("action_items"):
             sections.append(("行动项", "\n".join(f"- {item}" for item in insights["action_items"])))
+        if insights.get("chapters"):
+            sections.append(("章节", "\n".join(
+                f"- {item.get('title')}: {item.get('summary', '')}" for item in insights["chapters"]
+                if isinstance(item, dict) and item.get("title")
+            )))
+        if insights.get("entities"):
+            sections.append(("实体", "\n".join(
+                f"- {item.get('name')} ({item.get('type', '其他')})" for item in insights["entities"]
+                if isinstance(item, dict) and item.get("name")
+            )))
         content = "\n\n".join(
             f"【{title}】\n{body}" for title, body in sections if body
         )
@@ -173,6 +183,20 @@ class ExportService:
         if insights.get("action_items"):
             lines.extend(["", "## 行动项", ""])
             lines.extend(f"- {item}" for item in insights["action_items"])
+        if insights.get("chapters"):
+            lines.extend(["", "## 章节", ""])
+            lines.extend(
+                f"- **{item.get('title')}**: {item.get('summary', '')}"
+                for item in insights["chapters"]
+                if isinstance(item, dict) and item.get("title")
+            )
+        if insights.get("entities"):
+            lines.extend(["", "## 实体", ""])
+            lines.extend(
+                f"- {item.get('name')} ({item.get('type', '其他')})"
+                for item in insights["entities"]
+                if isinstance(item, dict) and item.get("name")
+            )
         content = "\n".join(lines).strip()
         if not content:
             raise ExportNotFound("无可导出内容")
