@@ -1,6 +1,5 @@
 import json
 import re
-from ast import literal_eval
 
 import httpx
 from loguru import logger
@@ -25,7 +24,7 @@ class Summarizer:
         logger.info("调用LLM API生成摘要")
         try:
             result = await self._call_llm(text, template)
-            result = self._normalise_result(result)
+            result = self._normalise_result(result, text)
             logger.info("摘要生成完成")
             return result
         except SummarizationError:
@@ -45,12 +44,11 @@ class Summarizer:
                 {
                     "role": "system",
                     "content": (
-                        "你是一个专业的中文内容整理助手。请分析下面的文字稿。为降低格式错误，禁止输出 JSON、Markdown 代码块或额外解释，严格按以下标题输出六段文本；每个标题必须独占一行：\n\n"
-                        "[整理稿]\n整理后的完整文字稿\n[摘要]\n简洁摘要\n[关键观点]\n每行一个观点，以 - 开头；没有则写 - 无\n"
-                        "[章节]\n每行一个章节标题；没有则写 - 无\n[行动项]\n每行一个行动项，以 - 开头；没有则写 - 无\n[实体]\n每行一个实体名称；没有则写 - 无\n\n"
-                        "所有内容使用中文，专有名词保留原文。整理文字稿时只删除口头语、重复和明显口误，不改变事实和观点。"
+                        "请用中文总结下面的文字稿。不要输出 JSON、代码块或解释，只按以下三个标题输出：\n\n"
+                        "摘要：\n用几句话概括主题、结论和关键事实。\n关键观点：\n每行一个观点，以 - 开头；没有则写 - 无。\n行动项：\n每行一个行动项，以 - 开头；没有则写 - 无。\n\n"
+                        "不需要改写全文，服务会保留原始文字稿。"
                         f"摘要模板为 {template}：{self._template_instruction(template)}\n\n"
-                        "如果没有行动项、章节或实体，只写 - 无。"
+                        "标题必须独占一行。"
                     ),
                 },
                 {"role": "user", "content": text},
@@ -67,7 +65,7 @@ class Summarizer:
                 )
             data = response.json()
             content = data["choices"][0]["message"]["content"]
-            return self._parse_response(content, source_text=text)
+            return self._parse_response(content)
 
     @staticmethod
     def _template_instruction(template: str) -> str:
@@ -79,8 +77,8 @@ class Summarizer:
         }.get(template, "突出主题、结论和关键事实")
 
     @staticmethod
-    def _parse_response(content: str, source_text: str | None = None) -> dict:
-        cleaned = Summarizer._clean_model_output(content)
+    def _parse_response(content: str) -> dict:
+        cleaned = re.sub(r"<think>.*?</think>", "", content or "", flags=re.DOTALL).strip()
         try:
             parsed = json.loads(cleaned)
             if isinstance(parsed, dict):
@@ -88,103 +86,41 @@ class Summarizer:
         except json.JSONDecodeError:
             pass
 
-        # Some local models emit a Python-style dict (single quotes/trailing commas).
-        try:
-            parsed = literal_eval(cleaned)
-            if isinstance(parsed, dict):
-                return parsed
-        except (SyntaxError, ValueError):
-            pass
+        sections = Summarizer._parse_sections(cleaned)
+        if sections:
+            return sections
 
-        # Accept prose surrounding a JSON object, which is common with instruct models.
-        decoder = json.JSONDecoder()
-        for match in re.finditer(r"\{", cleaned):
-            try:
-                parsed, _ = decoder.raw_decode(cleaned[match.start():])
-            except json.JSONDecodeError:
-                continue
-            if isinstance(parsed, dict):
-                return parsed
-
-        section_result = Summarizer._parse_sections(cleaned)
-        if section_result:
-            return section_result
-
-        # Backward-compatible parsing for older local model prompts.
-        parts = cleaned.split("---SUMMARY---")
-        if len(parts) >= 2:
-            transcript_part = parts[0].replace("---TRANSCRIPT_CLEAN---", "").strip()
-            return {
-                "transcript_clean": transcript_part,
-                "summary": parts[1].strip(),
-                "key_points": [],
-                "chapters": [],
-                "action_items": [],
-                "entities": [],
-            }
-
-        # Last-resort fallback: preserve the source transcript and expose the model
-        # response as a plain summary. This keeps small local models usable even when
-        # they ignore every formatting instruction.
         if cleaned:
             logger.warning("LLM 未返回结构化摘要，已降级为纯文本结果")
             return {
-                "transcript_clean": source_text or cleaned,
                 "summary": cleaned,
                 "key_points": [],
-                "chapters": [],
                 "action_items": [],
-                "entities": [],
             }
         raise ValueError("LLM 返回为空")
 
     @staticmethod
-    def _clean_model_output(content: str) -> str:
-        cleaned = re.sub(r"<think>.*?</think>", "", content or "", flags=re.DOTALL).strip()
-        return re.sub(r"^```(?:json)?\s*|\s*```$", "", cleaned, flags=re.IGNORECASE).strip()
-
-    @staticmethod
     def _parse_sections(content: str) -> dict | None:
-        """Parse a compact marker format that is easier for small models than JSON."""
-        aliases = {
-            "transcript_clean": r"整理稿|整理版文字稿|TRANSCRIPT_CLEAN",
-            "summary": r"摘要|SUMMARY",
-            "key_points": r"关键观点|主要观点|KEY_POINTS",
-            "chapters": r"章节|CHAPTERS",
-            "action_items": r"行动项|待办事项|ACTION_ITEMS",
-            "entities": r"实体|ENTITIES",
-        }
-        positions = []
-        for key, alias in aliases.items():
-            match = re.search(rf"(?im)^\s*(?:\[\s*)?(?:{alias})(?:\s*\])?\s*[:：]?\s*$", content)
-            if match:
-                positions.append((match.start(), match.end(), key))
-        if not positions:
+        matches = list(re.finditer(r"(?m)^\s*(摘要|关键观点|行动项)\s*[:：]?\s*$", content))
+        if not matches:
             return None
-        positions.sort()
-        result = {"key_points": [], "chapters": [], "action_items": [], "entities": []}
-        for index, (_, end, key) in enumerate(positions):
-            next_start = positions[index + 1][0] if index + 1 < len(positions) else len(content)
-            value = content[end:next_start].strip()
-            if key in {"transcript_clean", "summary"}:
-                result[key] = value
-            elif key == "key_points" or key == "action_items":
-                result[key] = [line.lstrip("-•* ").strip() for line in value.splitlines() if line.strip()]
-            elif key == "chapters":
-                result[key] = [
-                    {"title": line.lstrip("-•* ").strip(), "summary": ""}
-                    for line in value.splitlines() if line.strip()
+        result = {"key_points": [], "action_items": []}
+        for index, match in enumerate(matches):
+            end = matches[index + 1].start() if index + 1 < len(matches) else len(content)
+            value = content[match.end():end].strip()
+            if match.group(1) == "摘要":
+                result["summary"] = value
+            else:
+                result["key_points" if match.group(1) == "关键观点" else "action_items"] = [
+                    line.lstrip("-•* ").strip()
+                    for line in value.splitlines()
+                    if line.strip() and line.strip() not in {"无", "- 无"}
                 ]
-            elif key == "entities":
-                result[key] = [
-                    {"name": line.lstrip("-•* ").strip(), "type": "其他"}
-                    for line in value.splitlines() if line.strip()
-                ]
-        return result if result.get("summary") or result.get("transcript_clean") else None
+        return result if result.get("summary") else None
 
     @classmethod
-    def _normalise_result(cls, result: dict) -> dict:
-        transcript_clean = result.get("transcript_clean")
+    def _normalise_result(cls, result: dict, source_text: str = "") -> dict:
+        transcript_clean = result.get("transcript_clean") or source_text
         summary = result.get("summary")
         if not isinstance(transcript_clean, str) or not isinstance(summary, str):
             raise ValueError("LLM 摘要缺少 transcript_clean 或 summary 字段")
