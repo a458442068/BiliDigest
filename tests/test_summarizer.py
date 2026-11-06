@@ -13,14 +13,19 @@ def test_parse_structured_summary_json():
     assert result["key_points"] == ["观点"]
 
 
-def test_parse_summary_accepts_small_model_section_format():
+def test_parse_summary_accepts_simple_marked_format():
     result = Summarizer._parse_response(
-        "摘要：\n这是摘要\n关键观点：\n- 观点一\n行动项：\n- 待办",
+        "---TRANSCRIPT_CLEAN---\n这是整理稿\n---SUMMARY---\n这是详细摘要\n"
+        "---KEY_POINTS---\n- 观点一\n---CHAPTERS---\n- 开场 | 介绍背景\n"
+        "---ACTION_ITEMS---\n- 待办\n---ENTITIES---\n- BiliDigest | 项目",
     )
 
-    assert result["summary"] == "这是摘要"
+    assert result["transcript_clean"] == "这是整理稿"
+    assert result["summary"] == "这是详细摘要"
     assert result["key_points"] == ["观点一"]
+    assert result["chapters"] == [{"title": "开场", "summary": "介绍背景"}]
     assert result["action_items"] == ["待办"]
+    assert result["entities"] == [{"name": "BiliDigest", "type": "项目"}]
 
 
 def test_parse_summary_falls_back_for_plain_text_model_output():

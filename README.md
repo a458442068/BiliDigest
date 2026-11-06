@@ -98,7 +98,7 @@ curl http://localhost:8000/api/v1/jobs/{job_id}/result
 
 `options.summary_template` 支持 `general`、`notes`、`meeting` 和 `study`。结构化摘要会额外保存关键观点、章节、行动项和实体，并在 JSON/Markdown 导出中提供。
 
-摘要模型不要求必须返回 JSON。服务支持标准 JSON，以及小模型更容易遵守的 `摘要：`、`关键观点：`、`行动项：` 三段格式；模型输出普通文本时也会降级保存为摘要，原始文字稿会直接保留。
+摘要模型不要求必须返回 JSON。服务支持标准 JSON，以及小模型更容易遵守的六段分隔格式（`---TRANSCRIPT_CLEAN---`、`---SUMMARY---`、`---KEY_POINTS---`、`---CHAPTERS---`、`---ACTION_ITEMS---`、`---ENTITIES---`）；模型输出普通文本时也会降级保存为摘要。
 
 ### 浏览器脚本
 

@@ -44,11 +44,23 @@ class Summarizer:
                 {
                     "role": "system",
                     "content": (
-                        "请用中文总结下面的文字稿。不要输出 JSON、代码块或解释，只按以下三个标题输出：\n\n"
-                        "摘要：\n用几句话概括主题、结论和关键事实。\n关键观点：\n每行一个观点，以 - 开头；没有则写 - 无。\n行动项：\n每行一个行动项，以 - 开头；没有则写 - 无。\n\n"
-                        "不需要改写全文，服务会保留原始文字稿。"
-                        f"摘要模板为 {template}：{self._template_instruction(template)}\n\n"
-                        "标题必须独占一行。"
+                        "你是中文内容整理助手。请完整分析下面的文字稿，只输出以下六个分隔段，"
+                        "不要输出 JSON、Markdown 代码块或额外解释。每个分隔标记必须单独占一行，"
+                        "标记名称和横线必须完全保持不变。\n\n"
+                        "---TRANSCRIPT_CLEAN---\n"
+                        "输出整理后的完整文字稿：只删除语气词、重复和明显口误，不删减事实、观点、例子或重要细节。\n\n"
+                        "---SUMMARY---\n"
+                        "输出详细摘要，覆盖主题、背景、主要论点、关键事实、结论和限制；分成 3 到 8 段。\n\n"
+                        "---KEY_POINTS---\n"
+                        "每行一个关键观点，以 - 开头；没有则写 - 无。\n\n"
+                        "---CHAPTERS---\n"
+                        "每行一个章节，格式为“章节标题 | 章节摘要”；没有则写 - 无。\n\n"
+                        "---ACTION_ITEMS---\n"
+                        "只列出原文明确提到的待办或建议，每行一个，以 - 开头；没有则写 - 无。\n\n"
+                        "---ENTITIES---\n"
+                        "每行一个实体，格式为“名称 | 类型”；没有则写 - 无。\n\n"
+                        "所有内容使用中文，专有名词保留原文。"
+                        f"摘要模板为 {template}：{self._template_instruction(template)}。"
                     ),
                 },
                 {"role": "user", "content": text},
@@ -86,7 +98,7 @@ class Summarizer:
         except json.JSONDecodeError:
             pass
 
-        sections = Summarizer._parse_sections(cleaned)
+        sections = Summarizer._parse_marked_sections(cleaned)
         if sections:
             return sections
 
@@ -100,23 +112,63 @@ class Summarizer:
         raise ValueError("LLM 返回为空")
 
     @staticmethod
-    def _parse_sections(content: str) -> dict | None:
-        matches = list(re.finditer(r"(?m)^\s*(摘要|关键观点|行动项)\s*[:：]?\s*$", content))
+    def _parse_marked_sections(content: str) -> dict | None:
+        names = (
+            "TRANSCRIPT_CLEAN",
+            "SUMMARY",
+            "KEY_POINTS",
+            "CHAPTERS",
+            "ACTION_ITEMS",
+            "ENTITIES",
+        )
+        pattern = re.compile(r"(?m)^---(" + "|".join(names) + r")---\s*$")
+        matches = list(pattern.finditer(content))
         if not matches:
             return None
-        result = {"key_points": [], "action_items": []}
+        result = {
+            "key_points": [],
+            "chapters": [],
+            "action_items": [],
+            "entities": [],
+        }
         for index, match in enumerate(matches):
             end = matches[index + 1].start() if index + 1 < len(matches) else len(content)
             value = content[match.end():end].strip()
-            if match.group(1) == "摘要":
-                result["summary"] = value
-            else:
-                result["key_points" if match.group(1) == "关键观点" else "action_items"] = [
+            name = match.group(1)
+            if name == "TRANSCRIPT_CLEAN" or name == "SUMMARY":
+                result["transcript_clean" if name == "TRANSCRIPT_CLEAN" else "summary"] = value
+            elif name in {"KEY_POINTS", "ACTION_ITEMS"}:
+                result["key_points" if name == "KEY_POINTS" else "action_items"] = [
                     line.lstrip("-•* ").strip()
                     for line in value.splitlines()
                     if line.strip() and line.strip() not in {"无", "- 无"}
                 ]
+            elif name == "CHAPTERS":
+                result["chapters"] = Summarizer._parse_pair_lines(value)
+            elif name == "ENTITIES":
+                result["entities"] = [
+                    {"name": pair[0], "type": pair[1] or "其他"}
+                    for pair in Summarizer._parse_pairs(value)
+                ]
         return result if result.get("summary") else None
+
+    @staticmethod
+    def _parse_pairs(value: str) -> list[tuple[str, str]]:
+        pairs = []
+        for line in value.splitlines():
+            line = line.lstrip("-•* ").strip()
+            if not line or line in {"无", "- 无"}:
+                continue
+            parts = [part.strip() for part in line.split("|", 1)]
+            pairs.append((parts[0], parts[1] if len(parts) == 2 else ""))
+        return pairs
+
+    @staticmethod
+    def _parse_pair_lines(value: str) -> list[dict]:
+        return [
+            {"title": title, "summary": summary}
+            for title, summary in Summarizer._parse_pairs(value)
+        ]
 
     @classmethod
     def _normalise_result(cls, result: dict, source_text: str = "") -> dict:
