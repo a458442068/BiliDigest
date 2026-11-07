@@ -126,6 +126,18 @@ def test_admin_detail_shows_part_metadata(monkeypatch, tmp_path):
     assert "12秒" in response.text
 
 
+def test_admin_detail_loads_mathjax_for_markdown_preview(monkeypatch, tmp_path):
+    storage = patch_storage(monkeypatch, tmp_path)
+    bv_id = seed_video(storage)
+
+    response = client.get(f"/admin/video/{bv_id}")
+
+    assert response.status_code == 200
+    assert "window.MathJax" in response.text
+    assert "mathjax@3/es5/tex-mml-chtml.js" in response.text
+    assert "typesetMath" in response.text
+
+
 def test_admin_detail_shows_timestamp_controls(monkeypatch, tmp_path):
     storage = patch_storage(monkeypatch, tmp_path)
     bv_id = seed_video(storage)

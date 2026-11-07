@@ -340,12 +340,25 @@
         if (!raw) return;
         el.innerHTML = DOMPurify.sanitize(marked.parse(raw));
         el.dataset.mode = 'preview';
+        typesetMath(el);
+    }
+
+    function typesetMath(root) {
+        if (!window.MathJax?.typesetPromise || !root) return;
+        const targets = root instanceof Element ? [root] : Array.from(root);
+        window.MathJax.typesetClear?.(targets);
+        window.MathJax.typesetPromise(targets).catch((error) => {
+            console.warn('MathJax 渲染失败', error);
+        });
     }
 
     function renderAllMarkdown() {
         document.querySelectorAll('[data-markdown]').forEach(renderMarkdownElement);
     }
     renderAllMarkdown();
+    window.addEventListener('load', () => {
+        typesetMath(document.querySelectorAll('[data-markdown]'));
+    });
 
     function setActiveSegment(part, currentTime) {
         document.querySelectorAll(`[data-segment-list="${part}"] .segment-button`).forEach((button) => {
@@ -383,6 +396,7 @@
                 target.innerHTML = DOMPurify.sanitize(marked.parse(target.dataset.markdown));
                 target.dataset.mode = 'preview';
                 btn.textContent = '原始';
+                typesetMath(target);
             }
         });
     });
@@ -448,6 +462,7 @@
             readerText.innerHTML = DOMPurify.sanitize(marked.parse(readerRawMarkdown));
             readerText.dataset.mode = 'preview';
             readerToggle.textContent = '原始';
+            typesetMath(readerText);
             readerModal.classList.remove('hidden');
         });
     });
@@ -463,6 +478,7 @@
             readerText.innerHTML = DOMPurify.sanitize(marked.parse(readerRawMarkdown));
             readerText.dataset.mode = 'preview';
             readerToggle.textContent = '原始';
+            typesetMath(readerText);
         }
     });
 

@@ -108,6 +108,8 @@ curl http://localhost:8000/api/v1/jobs/{job_id}/result
 
 访问 `http://localhost:8000/admin/` 查看已处理视频列表、详情、搜索、删除和重新处理。
 
+详情页的 Markdown 预览支持 MathJax 公式：行内公式可使用 `\\( ... \\)` 或 `$ ... $`，块公式可使用 `\\[ ... \\]` 或 `$$ ... $$`。
+
 > 本项目按本机/可信内网工具设计，默认不提供 admin 鉴权。请不要在公网裸露 `/admin/` 或 `/results/`。
 
 ## 支持的站点
